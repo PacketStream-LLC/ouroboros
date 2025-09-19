@@ -1,4 +1,4 @@
-<p align="center"><img width="384" height="384" alt="ouroboros logo" src="https://github.com/user-attachments/assets/d7f8f836-a092-4be6-ba93-7401d2c3be4c" /></p>
+<p align="center"><img width="384" height="384" alt="ouroboros logo" src="https://github.com/user-attachments/assets/8484c64e-1058-40ca-8e12-1b6d4d713594" /></p>
 
 > [!WARNING]
 > This is not an official PacketStream LLC service or product.
