@@ -1,0 +1,12 @@
+# ouroboros.gitignore
+src/
+target/
+
+.vscode/c_cpp_properties.json
+.clangd
+
+# prebuilt binary
+/ouroboros
+
+# this is not an ouroboros based project
+ouroboros.json

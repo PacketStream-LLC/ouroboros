@@ -1,0 +1,103 @@
+name: Build ouroboros
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ published ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.24.4'
+
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Run tests
+      run: go test -v ./...
+
+    - name: Set binary name
+      id: binary
+      run: |
+        BINARY_NAME="ouroboros-linux-${{ matrix.goarch }}"
+        echo "name=${BINARY_NAME}" >> $GITHUB_OUTPUT
+
+    - name: Build binary
+      env:
+        GOOS: linux
+        GOARCH: ${{ matrix.goarch }}
+        CGO_ENABLED: 0
+      run: |
+        go build -ldflags="-s -w" -o ${{ steps.binary.outputs.name }}
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ouroboros-${{ matrix.goarch }}
+        path: ${{ steps.binary.outputs.name }}
+        retention-days: 30
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: ouroboros-*
+        path: ./binaries
+        merge-multiple: true
+
+    - name: Create checksums
+      run: |
+        cd binaries
+        sha256sum * > checksums.txt
+
+    - name: Upload release assets
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          binaries/*
+        body: |
+          ## Downloads
+          
+          Download the appropriate binary for your Linux system:
+          
+          - **Linux AMD64**: `ouroboros-linux-amd64`
+          - **Linux ARM64**: `ouroboros-linux-arm64`
+          
+          ## Installation
+          
+          1. Download the binary for your architecture
+          2. Make it executable: `chmod +x ouroboros-linux-*`
+          3. Move to your PATH: `sudo mv ouroboros-linux-* /usr/local/bin/ouroboros`
+          
+          
+          ## Verification
+          
+          Verify the download with the provided checksums in `checksums.txt`.
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,11 @@
+#include <linux/bpf.h>
+#include <bpf/bpf_helpers.h>
+#include "_ouroboros/programs.h"
+
+SEC("xdp")
+int {{.progName}}(struct xdp_md *ctx) {
+    // Simple XDP program that drops all packets
+    return XDP_DROP;
+}
+
+char _license[] SEC("license") = "GPL";
