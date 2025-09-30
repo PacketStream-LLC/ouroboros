@@ -22,7 +22,7 @@ Running a single eBPF program is straightforward. But what if you need to run ma
 Make sure you have Go, Clang, and LLVM installed.
 
 ```bash
-go get -u github.com/PacketStream-LLC/ouroboros
+go install github.com/PacketStream-LLC/ouroboros@latest
 ```
 
 ## Getting Started
