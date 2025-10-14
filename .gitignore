@@ -4,6 +4,7 @@ target/
 
 .vscode/c_cpp_properties.json
 .clangd
+.idea/
 
 # prebuilt binary
 /ouroboros

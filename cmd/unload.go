@@ -28,16 +28,6 @@ var unloadCmd = &cobra.Command{
 			fmt.Printf("Unpinned program %s\n", prog.Name)
 		}
 
-		// Unpin shared maps
-		for _, sharedMap := range config.SharedMaps {
-			mapPath := filepath.Join(bpfBaseDir, sharedMap.Name)
-			if err := os.Remove(mapPath); err != nil {
-				fmt.Printf("failed to unpin shared map %s: %v\n", sharedMap.Name, err)
-				// Don't exit, try to unpin other maps
-			}
-			fmt.Printf("Unpinned shared map %s\n", sharedMap.Name)
-		}
-
 		// Unpin program array map
 		progMapPath := filepath.Join(bpfBaseDir, config.GetProgramMap())
 		if err := os.Remove(progMapPath); err != nil {

@@ -21,11 +21,11 @@ type ProgramMetadata struct {
 }
 
 type OuroborosConfig struct {
-	Programs      []Program         `json:"programs"`
-	SharedMaps    []SharedMapConfig `json:"shared_maps,omitempty"`
-	CompileArgs   []string          `json:"compile_args"`
-	ProgramMap    string            `json:"program_map,omitempty"`
-	ProgramPrefix string            `json:"program_prefix,omitempty"`
+	Programs      []Program `json:"programs"`
+	CompileArgs   []string  `json:"compile_args"`
+	ProgramMap    string    `json:"program_map,omitempty"`
+	ProgramPrefix string    `json:"program_prefix,omitempty"`
+	//SharedMaps    []SharedMapConfig `json:"shared_maps,omitempty"`
 }
 
 func (c *OuroborosConfig) GetMainProgram() *Program {

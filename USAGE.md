@@ -22,6 +22,7 @@ ouroboros generate
 | `ouroboros run <interface>` | Build, load, attach, and show log at the same time. |
 | `ouroboros log` | Attach to kernel tracing for debugging ebpf_printk. |
 | `ouroboros generate` | Generate _ouroboros related files (e.g., headers, maps) |
+| `ouroboros map` | List all eBPF maps discovered in compiled programs with their specifications. |
 | `ouroboros flow [output_file]` | Analyze the tail call flow and generate a Mermaid flowchart. |
 
 ## `ouroboros.json`
@@ -102,6 +103,49 @@ By default if you are using `ouroboros build` command to build, you can include 
 ## Generated "Shared Maps" Header
 `ouroboros` also generates a header file at `src/_ouroboros/maps.h` with definitions for your shared maps.  
 This is automatically machine generated and can be imported via `src/_ouroboros/maps.h` in your C code, so you don't need to keep track of which maps are available by looking at `/sys/fs/bpf/` or `bpftool` output.
+
+## Map Discovery
+
+The `ouroboros map` command analyzes compiled eBPF programs and lists all discovered maps with their specifications:
+
+```bash
+ouroboros map
+```
+
+This command:
+- Parses compiled `.o` files from the `target/` directory
+- Extracts map metadata (type, key size, value size, max entries)
+- Shows which programs use each map
+- Identifies potential shared maps (used in multiple programs or prefixed with `shared_`)
+
+Example output:
+```
+Maps discovered in compiled programs:
+
+📍 events
+   Type:        RingBuf
+   Key Size:    0 bytes
+   Value Size:  0 bytes
+   Max Entries: 65536
+   Program:     main
+
+📍 shared_config
+   Type:        Hash
+   Key Size:    4 bytes
+   Value Size:  64 bytes
+   Max Entries: 1024
+   Programs:    main, filter, process
+
+Total: 2 map(s) discovered
+
+Potential shared maps (1):
+  - shared_config (used in: main, filter, process)
+```
+
+Use `--verbose` flag for more detailed information:
+```bash
+ouroboros map -v
+```
 
 ## Flowchart Generation
 

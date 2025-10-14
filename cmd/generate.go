@@ -13,9 +13,6 @@ import (
 //go:embed templates/programs.h.tmpl
 var programsHeaderTemplateContent string
 
-//go:embed templates/maps.h.tmpl
-var mapsHeaderTemplateContent string
-
 //go:embed templates/.gitignore.tmpl
 var gitignoreTemplateContent string
 
@@ -39,11 +36,6 @@ var generateCmd = &cobra.Command{
 		}
 
 		if err := GenerateProgramsHeader(ouroborosConfig); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-
-		if err := GenerateMapsHeader(ouroborosConfig); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
@@ -94,102 +86,6 @@ func GenerateProgramsHeader(config *OuroborosConfig) error {
 	}
 
 	fmt.Printf("Generated %s\n", programsHeaderPath)
-	return nil
-}
-
-func GenerateMapsHeader(config *OuroborosConfig) error {
-	globalDir := ouroborosGlobalDir
-
-	if err := os.MkdirAll(globalDir, 0755); err != nil {
-		return fmt.Errorf("failed to create %s: %w", globalDir, err)
-	}
-
-	mapsHeaderPath := filepath.Join(globalDir, "maps.h")
-	file, err := os.Create(mapsHeaderPath)
-	if err != nil {
-		return fmt.Errorf("failed to create %s: %w", mapsHeaderPath, err)
-	}
-	defer file.Close()
-
-	// Create a temporary config to pass to the template with BPFTypeString
-	type TempSharedMapConfig struct {
-		SharedMapConfig
-		BPFTypeString string
-	}
-
-	type TempOuroborosConfig struct {
-		*OuroborosConfig
-		SharedMaps []TempSharedMapConfig
-	}
-
-	tempConfig := TempOuroborosConfig{OuroborosConfig: config}
-	for _, sm := range config.SharedMaps {
-		tempSm := TempSharedMapConfig{SharedMapConfig: sm}
-		switch sm.Type {
-		case "Hash":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_HASH"
-		case "Array":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_ARRAY"
-		case "ProgramArray":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_PROG_ARRAY"
-		case "PerfEventArray":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_PERF_EVENT_ARRAY"
-		case "PerCPUHash":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_PERCPU_HASH"
-		case "PerCPUArray":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_PERCPU_ARRAY"
-		case "StackTrace":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_STACK_TRACE"
-		case "CGroupArray":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_CGROUP_ARRAY"
-		case "LRUHash":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_LRU_HASH"
-		case "LRUCPUHash":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_LRU_CPU_HASH"
-		case "LPMTrie":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_LPM_TRIE"
-		case "ArrayOfMaps":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_ARRAY_OF_MAPS"
-		case "HashOfMaps":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_HASH_OF_MAPS"
-		case "DevMap":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_DEVMAP"
-		case "SockMap":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_SOCKMAP"
-		case "CPUMap":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_CPUMAP"
-		case "XSKMap":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_XSKMAP"
-		case "RingBuf":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_RINGBUF"
-		case "InodeStorage":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_INODE_STORAGE"
-		case "TaskStorage":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_TASK_STORAGE"
-		case "CGroupStorage":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_CGROUP_STORAGE"
-		case "SyscallOps":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_SYSCALL_OPS"
-		case "StructOps":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_STRUCT_OPS"
-		case "PCPUArray":
-			tempSm.BPFTypeString = "BPF_MAP_TYPE_PCPU_ARRAY"
-		default:
-			return fmt.Errorf("unsupported map type: %s", sm.Type)
-		}
-		tempConfig.SharedMaps = append(tempConfig.SharedMaps, tempSm)
-	}
-
-	tmpl, err := template.New("maps_header").Parse(mapsHeaderTemplateContent)
-	if err != nil {
-		return fmt.Errorf("failed to parse template: %w", err)
-	}
-
-	if err := tmpl.Execute(file, tempConfig); err != nil {
-		return fmt.Errorf("failed to execute template: %w", err)
-	}
-
-	fmt.Printf("Generated %s\n", mapsHeaderPath)
 	return nil
 }
 
