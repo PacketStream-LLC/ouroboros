@@ -63,8 +63,21 @@ var loadCmd = &cobra.Command{
 
 			xdpProg := coll.Programs[progName]
 			if xdpProg == nil {
-				fmt.Printf("program %s not found in %s\n", progName, objFile)
-				os.Exit(1)
+				if len(coll.Programs) == 1 {
+					// fallback mode
+					// get first program as xdpProg
+					progNameAuto := progName
+					for key, prog := range coll.Programs {
+						progNameAuto = key
+						xdpProg = prog
+						break
+					}
+
+					fmt.Printf("No xdp program named %s in %s. falling back to %s\n", progName, objFile, progNameAuto)
+				} else {
+					fmt.Printf("program %s not found in %s\n", progName, objFile)
+					os.Exit(1)
+				}
 			}
 
 			if err := xdpProg.Pin(filepath.Join(bpfBaseDir, progName)); err != nil {
