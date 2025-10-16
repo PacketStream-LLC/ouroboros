@@ -28,11 +28,8 @@ var loadCmd = &cobra.Command{
 			Pinning:    ebpf.PinByName,
 		}
 
-		opts := ebpf.MapOptions{
-			PinPath: bpfBaseDir,
-		}
+		progmap, err := ebpf.NewMapWithOptions(progmapSpec, bpfMapOptions)
 
-		progmap, err := ebpf.NewMapWithOptions(progmapSpec, opts)
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
@@ -55,7 +52,9 @@ var loadCmd = &cobra.Command{
 				os.Exit(1)
 			}
 
-			coll, err := ebpf.NewCollection(collSpec)
+			coll, err := ebpf.NewCollectionWithOptions(collSpec, ebpf.CollectionOptions{
+				Maps: bpfMapOptions,
+			})
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
