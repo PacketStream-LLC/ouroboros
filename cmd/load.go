@@ -28,7 +28,11 @@ var loadCmd = &cobra.Command{
 			Pinning:    ebpf.PinByName,
 		}
 
-		progmap, err := ebpf.NewMap(progmapSpec)
+		opts := ebpf.MapOptions{
+			PinPath: bpfBaseDir,
+		}
+
+		progmap, err := ebpf.NewMapWithOptions(progmapSpec, opts)
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
