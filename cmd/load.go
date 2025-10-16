@@ -80,8 +80,20 @@ var loadCmd = &cobra.Command{
 				}
 			}
 
-			if err := xdpProg.Pin(filepath.Join(bpfBaseDir, progName)); err != nil {
-				fmt.Println("error while pinning program", err)
+			pinPath := filepath.Join(bpfBaseDir, progName)
+
+			// check if pinPath exists
+			if _, err := os.Stat(pinPath); !os.IsNotExist(err) {
+				// first delete
+				err = os.Remove(pinPath)
+				if err != nil {
+					fmt.Println("Failed to cleanup existing pinPath:", err)
+					os.Exit(1)
+				}
+			}
+
+			if err := xdpProg.Pin(pinPath); err != nil {
+				fmt.Println("error while pinning program.", err)
 				os.Exit(1)
 			}
 
