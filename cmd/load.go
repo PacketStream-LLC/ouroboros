@@ -84,6 +84,14 @@ var loadCmd = &cobra.Command{
 
 			// check if pinPath exists
 			if _, err := os.Stat(pinPath); !os.IsNotExist(err) {
+				prePinnedProgram, err := ebpf.LoadPinnedProgram(pinPath, &ebpf.LoadPinOptions{})
+				if err == nil {
+					if err := prePinnedProgram.Unpin(); err != nil {
+						fmt.Println(err)
+						os.Exit(1)
+					}
+				}
+
 				// first delete
 				err = os.Remove(pinPath)
 				if err != nil {

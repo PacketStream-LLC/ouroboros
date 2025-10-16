@@ -1,9 +1,13 @@
 package cmd
 
-import "github.com/cilium/ebpf"
+import (
+	"path/filepath"
+
+	"github.com/cilium/ebpf"
+)
 
 var srcDir string = "src"
-var ouroborosGlobalDir string = srcDir + "/_ouroboros"
+var ouroborosGlobalDir string = filepath.Join(srcDir, "_ouroboros")
 
 var targetDir string = "target"
 
