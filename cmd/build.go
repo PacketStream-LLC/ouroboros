@@ -26,9 +26,18 @@ var buildCmd = &cobra.Command{
 
 		for _, prog := range ouroborosConfig.Programs {
 			progName := prog.Name
-			progDir := filepath.Join("src", progName)
+			progDir := filepath.Join(srcDir, progName)
 			mainC := filepath.Join(progDir, "main.c")
-			outputO := filepath.Join("target", fmt.Sprintf("%s.o", progName))
+			outputO := filepath.Join(targetDir, fmt.Sprintf("%s.o", progName))
+
+			// check if filepath exists
+			if _, err := os.Stat(targetDir); os.IsNotExist(err) {
+				err = os.MkdirAll(targetDir, 0755)
+				if err != nil {
+					fmt.Println(err)
+					os.Exit(1)
+				}
+			}
 
 			args := []string{"-O2", "-g", "-target", "bpf", "-c", mainC, "-o", outputO, "-Isrc/"}
 			args = append(args, ouroborosConfig.CompileArgs...)
