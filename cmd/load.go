@@ -69,12 +69,12 @@ var loadCmd = &cobra.Command{
 			}
 
 			if err := xdpProg.Pin(filepath.Join(bpfBaseDir, progName)); err != nil {
-				fmt.Println(err)
+				fmt.Println("error while pinning program", err)
 				os.Exit(1)
 			}
 
 			if err := progmap.Put(uint32(progID), uint32(xdpProg.FD())); err != nil {
-				fmt.Println(err)
+				fmt.Println("error while updating progmap", err)
 				os.Exit(1)
 			}
 		}
