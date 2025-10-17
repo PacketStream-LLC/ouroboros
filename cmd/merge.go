@@ -281,8 +281,7 @@ func deduplicateMapSymbols(objectPaths []string) ([]string, error) {
 	return dedupedPaths, nil
 }
 
-// removeSymbolsFromELF removes map definitions by zeroing out their data in .maps section
-// and converting symbols to extern references
+// removeSymbolsFromELF converts duplicate map symbols to extern (undefined) references
 func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string) error {
 	// Read the ELF file
 	data, err := os.ReadFile(inputPath)
@@ -296,10 +295,17 @@ func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string
 	}
 	defer elfFile.Close()
 
-	// Find .maps section
-	mapsSection := elfFile.Section(".maps")
-	if mapsSection == nil {
-		// No maps section, just copy
+	// Find symbol table section
+	var symtabSection *elf.Section
+	for _, section := range elfFile.Sections {
+		if section.Type == elf.SHT_SYMTAB {
+			symtabSection = section
+			break
+		}
+	}
+
+	if symtabSection == nil {
+		// No symbol table, just copy
 		return os.WriteFile(outputPath, data, 0644)
 	}
 
@@ -318,18 +324,28 @@ func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string
 		}
 	}
 
-	// Find the offset and size of each duplicate map in .maps section
-	for _, sym := range symbols {
+	// Modify symbol table entries: change duplicate symbols to SHN_UNDEF (extern)
+	symtabOffset := symtabSection.Offset
+	symEntrySize := uint64(24) // 64-bit ELF symbol table entry size
+
+	for i, sym := range symbols {
 		for _, symName := range symbolsToRemove {
 			if sym.Name == symName && sym.Section == mapsSectionIndex {
-				// Zero out this map's data in .maps section
-				mapOffset := mapsSection.Offset + sym.Value
-				mapSize := sym.Size
+				// Calculate offset to this symbol entry
+				entryOffset := symtabOffset + uint64(i)*symEntrySize
 
-				for i := uint64(0); i < mapSize; i++ {
-					data[mapOffset+i] = 0
-				}
-				fmt.Printf("    Zeroed map '%s' at offset %d, size %d\n", symName, mapOffset, mapSize)
+				// Change st_shndx to SHN_UNDEF (0)
+				// Symbol entry: name(4) + info(1) + other(1) + shndx(2) + value(8) + size(8)
+				shndxOffset := entryOffset + 6
+				binary.LittleEndian.PutUint16(data[shndxOffset:shndxOffset+2], uint16(elf.SHN_UNDEF))
+
+				// Set value and size to 0 for undefined symbols
+				valueOffset := entryOffset + 8
+				sizeOffset := entryOffset + 16
+				binary.LittleEndian.PutUint64(data[valueOffset:valueOffset+8], 0)
+				binary.LittleEndian.PutUint64(data[sizeOffset:sizeOffset+8], 0)
+
+				fmt.Printf("    Converted '%s' to extern reference (SHN_UNDEF)\n", symName)
 			}
 		}
 	}
