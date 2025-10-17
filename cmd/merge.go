@@ -15,12 +15,13 @@ import (
 )
 
 var mergeCmd = &cobra.Command{
-	Use:   "merge [program_name]",
+	Use:   "merge [src] [target]",
 	Short: "Merge eBPF tail call targets into a single object file, replacing tail calls with direct jumps",
-	Args:  cobra.ExactArgs(1),
+	Long: `Merge eBPF programs:
+  ouroboros merge              - Merge all programs into the main program (defined in config)
+  ouroboros merge [src] [target] - Merge target program into src program`,
+	Args: cobra.RangeArgs(0, 2),
 	Run: func(cmd *cobra.Command, args []string) {
-		programName := args[0]
-
 		if _, err := os.Stat("/usr/include/bpf/bpf.h"); os.IsNotExist(err) {
 			fmt.Println("libbpf-dev is not installed. Please install it first.")
 			os.Exit(1)
@@ -32,28 +33,71 @@ var mergeCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		// Find the program in config
+		var srcProg *Program
 		var targetProg *Program
-		for i := range ouroborosConfig.Programs {
-			if ouroborosConfig.Programs[i].Name == programName {
-				targetProg = &ouroborosConfig.Programs[i]
-				break
-			}
-		}
 
-		if targetProg == nil {
-			fmt.Printf("Program '%s' not found in ouroboros.json\n", programName)
+		switch len(args) {
+		case 0:
+			// No arguments: merge all into main program
+			srcProg = ouroborosConfig.GetMainProgram()
+			if srcProg == nil {
+				fmt.Println("No main program defined in ouroboros.json")
+				fmt.Println("Please set 'is_main: true' for one program or specify programs explicitly")
+				os.Exit(1)
+			}
+			fmt.Printf("Using main program '%s' as merge target\n", srcProg.Name)
+
+		case 2:
+			// Two arguments: merge target into src
+			srcName := args[0]
+			targetName := args[1]
+
+			// Find src program
+			for i := range ouroborosConfig.Programs {
+				if ouroborosConfig.Programs[i].Name == srcName {
+					srcProg = &ouroborosConfig.Programs[i]
+					break
+				}
+			}
+			if srcProg == nil {
+				fmt.Printf("Source program '%s' not found in ouroboros.json\n", srcName)
+				os.Exit(1)
+			}
+
+			// Find target program
+			for i := range ouroborosConfig.Programs {
+				if ouroborosConfig.Programs[i].Name == targetName {
+					targetProg = &ouroborosConfig.Programs[i]
+					break
+				}
+			}
+			if targetProg == nil {
+				fmt.Printf("Target program '%s' not found in ouroboros.json\n", targetName)
+				os.Exit(1)
+			}
+
+		default:
+			fmt.Println("Invalid usage. Use:")
+			fmt.Println("  ouroboros merge              - Merge all programs into main program")
+			fmt.Println("  ouroboros merge [src] [target] - Merge target into src")
 			os.Exit(1)
 		}
 
 		// Build all programs first
 		buildCmd.Run(cmd, []string{})
 
-		fmt.Printf("Analyzing tail calls in %s...\n", programName)
+		fmt.Printf("Analyzing tail calls in %s...\n", srcProg.Name)
 
 		// Analyze and merge
-		mergedObjectPath := filepath.Join(targetDir, fmt.Sprintf("%s.merged.o", programName))
-		mergeProgram(targetProg, ouroborosConfig, mergedObjectPath)
+		mergedObjectPath := filepath.Join(targetDir, fmt.Sprintf("%s.merged.o", srcProg.Name))
+
+		if targetProg != nil {
+			// Specific merge: src + target
+			mergeTwoPrograms(srcProg, targetProg, ouroborosConfig, mergedObjectPath)
+		} else {
+			// Full merge: src + all its tail call targets
+			mergeProgram(srcProg, ouroborosConfig, mergedObjectPath)
+		}
 
 		fmt.Printf("Merged object created at %s\n", mergedObjectPath)
 	},
@@ -63,6 +107,26 @@ type TailCallInfo struct {
 	InstructionIndex int
 	TargetProgramID  int
 	TargetProgram    *Program
+}
+
+func mergeTwoPrograms(srcProg *Program, targetProg *Program, config *OuroborosConfig, outputPath string) {
+	fmt.Printf("Merging %s into %s...\n", targetProg.Name, srcProg.Name)
+
+	objectsToMerge := []string{
+		filepath.Join(targetDir, fmt.Sprintf("%s.o", srcProg.Name)),
+		filepath.Join(targetDir, fmt.Sprintf("%s.o", targetProg.Name)),
+	}
+
+	fmt.Printf("Merging 2 object files:\n")
+	for _, obj := range objectsToMerge {
+		fmt.Printf("  - %s\n", obj)
+	}
+
+	// Link objects together
+	linkObjects(objectsToMerge, outputPath)
+
+	// Replace tail calls with jumps in the merged object
+	replaceTailCallsWithJumps(outputPath, srcProg, config)
 }
 
 func mergeProgram(prog *Program, config *OuroborosConfig, outputPath string) {
