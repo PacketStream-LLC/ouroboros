@@ -476,18 +476,13 @@ func linkObjects(objectPaths []string, outputPath string) {
 		irPaths = append(irPaths, outputLL)
 	}
 
-	// Step 2: Deduplicate all map globals
-	fmt.Println("  Deduplicating map globals...")
-	if err := deduplicateMapGlobals(irPaths); err != nil {
-		fmt.Printf("Failed to deduplicate: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Step 3: Link IR files with llvm-link
+	// Step 2: Link IR files with llvm-link
 	mergedLL := outputPath[:len(outputPath)-2] + ".ll" // Replace .o with .ll
 	fmt.Printf("  Linking %d LLVM IR files...\n", len(irPaths))
 
-	linkArgs := []string{"-S", "-o", mergedLL, "--override", "--only-needed"}
+	progFile := config.GetMainProgram().Name + ".ll"
+
+	linkArgs := []string{"-S", "-o", mergedLL, "--override=" + progFile, "--only-needed", "--internalize"}
 	linkArgs = append(linkArgs, irPaths...)
 
 	llvmLinkCmd := exec.Command("llvm-link", linkArgs...)
