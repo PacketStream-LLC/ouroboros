@@ -28,7 +28,7 @@ var loadCmd = &cobra.Command{
 			Pinning:    ebpf.PinByName,
 		}
 
-		progmap, err := ebpf.NewMapWithOptions(progmapSpec, bpfMapOptions)
+		progmap, err := ebpf.NewMapWithOptions(progmapSpec, config.GetMapOptions())
 
 		if err != nil {
 			fmt.Println(err)
@@ -36,7 +36,7 @@ var loadCmd = &cobra.Command{
 		}
 		defer progmap.Close()
 
-		if err := progmap.Pin(bpfBaseDir + "/" + config.GetProgramMap()); err != nil {
+		if err := progmap.Pin(filepath.Join(config.GetBpfBaseDir(), config.GetProgramMap())); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
@@ -53,7 +53,7 @@ var loadCmd = &cobra.Command{
 			}
 
 			coll, err := ebpf.NewCollectionWithOptions(collSpec, ebpf.CollectionOptions{
-				Maps: bpfMapOptions,
+				Maps: config.GetMapOptions(),
 			})
 			if err != nil {
 				fmt.Println(err)
@@ -61,9 +61,14 @@ var loadCmd = &cobra.Command{
 			}
 			defer coll.Close()
 
+			if prog.Entrypoint != "" {
+				progName = prog.Entrypoint
+			}
+
 			xdpProg := coll.Programs[progName]
 			if xdpProg == nil {
-				if len(coll.Programs) == 1 {
+				// if collection's program is 1 and only one entrypoint exists
+				if len(coll.Programs) == 1 && prog.Entrypoint == "" {
 					// fallback mode
 					// get first program as xdpProg
 					progNameAuto := progName
@@ -80,7 +85,7 @@ var loadCmd = &cobra.Command{
 				}
 			}
 
-			pinPath := filepath.Join(bpfBaseDir, progName)
+			pinPath := filepath.Join(config.GetBpfBaseDir(), progName)
 
 			// check if pinPath exists
 			if _, err := os.Stat(pinPath); !os.IsNotExist(err) {

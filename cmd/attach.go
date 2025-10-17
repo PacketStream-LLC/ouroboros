@@ -35,7 +35,7 @@ var attachCmd = &cobra.Command{
 			return
 		}
 
-		pinPath := filepath.Join(bpfBaseDir, ouroborosConfig.ProgramPrefix+program.Name)
+		pinPath := filepath.Join(ouroborosConfig.GetBpfBaseDir(), ouroborosConfig.ProgramPrefix+program.Name)
 		prog, err := ebpf.LoadPinnedProgram(pinPath, nil)
 		if err != nil {
 			fmt.Printf("failed to load pinned program %s: %s\n", pinPath, err)

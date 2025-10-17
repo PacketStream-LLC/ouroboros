@@ -86,7 +86,7 @@ Matches bpftool map list output format.`,
 
 		// Try to load pinned maps to get their kernel IDs
 		for name, mapInfo := range allMaps {
-			pinPath := filepath.Join(bpfBaseDir, name)
+			pinPath := filepath.Join(config.GetBpfBaseDir(), name)
 			if m, err := ebpf.LoadPinnedMap(pinPath, nil); err == nil {
 				mapID := m.FD()
 				mapInfo.ID = uint32(mapID)
@@ -166,7 +166,7 @@ You can specify the map by name or kernel ID.`,
 
 		// Try to load pinned maps to get their kernel IDs
 		for name, mapInfo := range allMaps {
-			pinPath := filepath.Join(bpfBaseDir, name)
+			pinPath := filepath.Join(config.GetBpfBaseDir(), name)
 			if m, err := ebpf.LoadPinnedMap(pinPath, nil); err == nil {
 				mapID := m.FD()
 				mapInfo.ID = uint32(mapID)
@@ -185,7 +185,7 @@ You can specify the map by name or kernel ID.`,
 
 			for _, name := range mapNames {
 				mapInfo := allMaps[name]
-				printMapInfoDetailed(mapInfo)
+				printMapInfoDetailed(config, mapInfo)
 			}
 			return
 		}
@@ -215,7 +215,7 @@ You can specify the map by name or kernel ID.`,
 			os.Exit(1)
 		}
 
-		printMapInfoDetailed(targetMap)
+		printMapInfoDetailed(config, targetMap)
 	},
 }
 
@@ -270,7 +270,7 @@ func printMapInfoBpftool(info *MapInfo, verbose bool) {
 	fmt.Println()
 }
 
-func printMapInfoDetailed(info *MapInfo) {
+func printMapInfoDetailed(config *OuroborosConfig, info *MapInfo) {
 	if info.Pinned && info.ID > 0 {
 		fmt.Printf("%d: %s  name %s  flags 0x0\n",
 			info.ID,
@@ -288,7 +288,7 @@ func printMapInfoDetailed(info *MapInfo) {
 		info.MaxEntries)
 
 	if info.Pinned {
-		pinPath := filepath.Join(bpfBaseDir, info.Name)
+		pinPath := filepath.Join(config.GetBpfBaseDir(), info.Name)
 		fmt.Printf("\tpinned %s\n", pinPath)
 	}
 

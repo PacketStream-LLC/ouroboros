@@ -27,7 +27,7 @@ var buildCmd = &cobra.Command{
 		for _, prog := range ouroborosConfig.Programs {
 			progName := prog.Name
 			progDir := filepath.Join(srcDir, progName)
-			mainC := filepath.Join(progDir, "main.c")
+			mainC := filepath.Join(progDir, entryPointFile)
 			outputO := filepath.Join(targetDir, fmt.Sprintf("%s.o", progName))
 
 			// check if filepath exists

@@ -34,7 +34,7 @@ var addCmd = &cobra.Command{
 			}
 		}
 
-		progDir := filepath.Join("src", progName)
+		progDir := filepath.Join(srcDir, progName)
 
 		if err := os.Mkdir(progDir, 0755); err != nil {
 			fmt.Println(err)
@@ -53,7 +53,7 @@ var addCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		mainCPath := filepath.Join(progDir, "main.c")
+		mainCPath := filepath.Join(progDir, entryPointFile)
 		if err := os.WriteFile(mainCPath, buf.Bytes(), 0644); err != nil {
 			fmt.Println(err)
 			os.Exit(1)

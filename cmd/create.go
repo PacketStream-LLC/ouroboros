@@ -12,24 +12,24 @@ var createCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new ouroboros project",
 	Run: func(cmd *cobra.Command, args []string) {
-		if err := os.Mkdir("src", 0755); err != nil {
+		if err := os.Mkdir(srcDir, 0755); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
 
-		if err := os.Mkdir("target", 0755); err != nil {
+		if err := os.Mkdir(targetDir, 0755); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
 
 		// Create src/_global directory
-		if err := os.MkdirAll(filepath.Join("src", "_global"), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(srcDir, "_global"), 0755); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
 
 		// Create src/_ouroboros directory
-		if err := os.MkdirAll(filepath.Join("src", "_ouroboros"), 0755); err != nil {
+		if err := os.MkdirAll(ouroborosGlobalDir, 0755); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}

@@ -20,7 +20,7 @@ var unloadCmd = &cobra.Command{
 
 		// Unpin programs
 		for _, prog := range config.Programs {
-			progPath := filepath.Join(bpfBaseDir, prog.Name)
+			progPath := filepath.Join(config.GetBpfBaseDir(), prog.Name)
 			if err := os.Remove(progPath); err != nil {
 				fmt.Printf("failed to unpin program %s: %v\n", prog.Name, err)
 				// Don't exit, try to unpin other programs
@@ -29,7 +29,7 @@ var unloadCmd = &cobra.Command{
 		}
 
 		// Unpin program array map
-		progMapPath := filepath.Join(bpfBaseDir, config.GetProgramMap())
+		progMapPath := filepath.Join(config.GetBpfBaseDir(), config.GetProgramMap())
 		if err := os.Remove(progMapPath); err != nil {
 			fmt.Printf("failed to unpin program array map %s: %v\n", config.GetProgramMap(), err)
 			os.Exit(1)

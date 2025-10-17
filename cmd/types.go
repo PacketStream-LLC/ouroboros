@@ -1,5 +1,7 @@
 package cmd
 
+import "github.com/cilium/ebpf"
+
 type SharedMapConfig struct {
 	Name       string `json:"name"`
 	Type       string `json:"type"`
@@ -10,10 +12,11 @@ type SharedMapConfig struct {
 }
 
 type Program struct {
-	Name     string           `json:"name"`
-	ID       int              `json:"id"`
-	IsMain   bool             `json:"is_main,omitempty"`
-	Metadata *ProgramMetadata `json:"metadata,omitempty"`
+	Name       string           `json:"name"`
+	ID         int              `json:"id"`
+	IsMain     bool             `json:"is_main,omitempty"`
+	Metadata   *ProgramMetadata `json:"metadata,omitempty"`
+	Entrypoint string           `json:"entrypoint,omitempty"`
 }
 
 type ProgramMetadata struct {
@@ -25,6 +28,7 @@ type OuroborosConfig struct {
 	CompileArgs   []string  `json:"compile_args"`
 	ProgramMap    string    `json:"program_map,omitempty"`
 	ProgramPrefix string    `json:"program_prefix,omitempty"`
+	BpfBaseDir    string    `json:"bpf_base_dir,omitempty"`
 	//SharedMaps    []SharedMapConfig `json:"shared_maps,omitempty"`
 }
 
@@ -43,4 +47,18 @@ func (c *OuroborosConfig) GetProgramMap() string {
 	}
 
 	return "ouro_progmaps"
+}
+
+func (c *OuroborosConfig) GetBpfBaseDir() string {
+	if c.BpfBaseDir != "" {
+		return "/sys/fs/bpf"
+	}
+
+	return c.BpfBaseDir
+}
+
+func (c *OuroborosConfig) GetMapOptions() ebpf.MapOptions {
+	return ebpf.MapOptions{
+		PinPath: c.GetBpfBaseDir(),
+	}
 }
