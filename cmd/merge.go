@@ -435,43 +435,83 @@ func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string
 }
 
 func linkObjects(objectPaths []string, outputPath string) {
-	fmt.Printf("Linking %d objects into %s...\n", len(objectPaths), outputPath)
+	fmt.Printf("Merging %d programs at LLVM IR level...\n", len(objectPaths))
 
-	// Deduplicate map symbols before linking
-	dedupedPaths, err := deduplicateMapSymbols(objectPaths)
-	if err != nil {
-		fmt.Printf("Failed to deduplicate map symbols: %v\n", err)
-		os.Exit(1)
-	}
+	// Step 1: Compile each object's source to LLVM IR
+	irPaths := []string{}
+	config, _ := ReadConfig()
 
-	// Use bpftool to link BPF object files
-	// bpftool gen object <output> <input1.o> <input2.o> ...
-	args := []string{"gen", "object", outputPath}
-	args = append(args, dedupedPaths...)
+	for _, objPath := range objectPaths {
+		// Get program name from object path (e.g., target/main.o -> main)
+		progName := filepath.Base(objPath)
+		progName = progName[:len(progName)-2] // Remove .o extension
 
-	linkCmd := exec.Command("bpftool", args...)
-	linkCmd.Stdout = os.Stdout
-	linkCmd.Stderr = os.Stderr
-	if err := linkCmd.Run(); err != nil {
-		fmt.Printf("bpftool linking failed: %v\n", err)
-		fmt.Println("Please ensure bpftool is installed and available in PATH")
-		os.Exit(1)
-	}
-
-	// Clean up temporary deduplicated files
-	for _, path := range dedupedPaths {
-		if path != outputPath {
-			os.Remove(path)
+		// Find the program in config
+		var prog *Program
+		for i := range config.Programs {
+			if config.Programs[i].Name == progName {
+				prog = &config.Programs[i]
+				break
+			}
 		}
+
+		if prog == nil {
+			fmt.Printf("Warning: Program %s not found in config\n", progName)
+			continue
+		}
+
+		progDir := filepath.Join(srcDir, progName)
+		mainC := filepath.Join(progDir, entryPointFile)
+		outputLL := filepath.Join(targetDir, fmt.Sprintf("%s.ll", progName))
+
+		fmt.Printf("  Compiling %s to LLVM IR...\n", progName)
+
+		// Compile to LLVM IR with -S -emit-llvm
+		args := []string{"-O2", "-g", "-target", "bpf", "-S", "-emit-llvm", mainC, "-o", outputLL, "-Isrc/"}
+		args = append(args, config.CompileArgs...)
+
+		clangCmd := exec.Command("clang", args...)
+		clangCmd.Stdout = os.Stdout
+		clangCmd.Stderr = os.Stderr
+		if err := clangCmd.Run(); err != nil {
+			fmt.Printf("Failed to compile %s to LLVM IR: %v\n", progName, err)
+			os.Exit(1)
+		}
+
+		irPaths = append(irPaths, outputLL)
 	}
 
-	fmt.Println("Linking complete.")
+	// Step 2: Link LLVM IR files
+	mergedLL := outputPath[:len(outputPath)-2] + ".ll" // Replace .o with .ll
+	fmt.Printf("  Linking %d LLVM IR files...\n", len(irPaths))
 
-	// Resize .maps section to match BTF expectations
-	if err := resizeMapsSection(outputPath); err != nil {
-		fmt.Printf("Failed to resize .maps section: %v\n", err)
+	linkArgs := []string{"-S", "-o", mergedLL}
+	linkArgs = append(linkArgs, irPaths...)
+
+	llvmLinkCmd := exec.Command("llvm-link", linkArgs...)
+	llvmLinkCmd.Stdout = os.Stdout
+	llvmLinkCmd.Stderr = os.Stderr
+	if err := llvmLinkCmd.Run(); err != nil {
+		fmt.Printf("llvm-link failed: %v\n", err)
+		fmt.Println("Please ensure llvm-link is installed and available in PATH")
 		os.Exit(1)
 	}
+
+	// Step 3: Compile merged LLVM IR to eBPF object
+	fmt.Printf("  Compiling merged LLVM IR to eBPF object...\n")
+
+	compileArgs := []string{"-O2", "-g", "-target", "bpf", "-c", mergedLL, "-o", outputPath}
+	compileArgs = append(compileArgs, config.CompileArgs...)
+
+	clangCmd := exec.Command("clang", compileArgs...)
+	clangCmd.Stdout = os.Stdout
+	clangCmd.Stderr = os.Stderr
+	if err := clangCmd.Run(); err != nil {
+		fmt.Printf("Failed to compile merged LLVM IR: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("LLVM IR merge complete.")
 }
 
 // resizeMapsSection resizes the .maps section to match BTF DATASEC size expectations
