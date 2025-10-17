@@ -476,12 +476,19 @@ func linkObjects(objectPaths []string, outputPath string) {
 		irPaths = append(irPaths, outputLL)
 	}
 
-	// Step 2: Merge IR files manually and replace tail calls
+	// Step 2: Link IR files with llvm-link (allows duplicate symbols)
 	mergedLL := outputPath[:len(outputPath)-2] + ".ll" // Replace .o with .ll
-	fmt.Printf("  Merging %d LLVM IR files and replacing tail calls...\n", len(irPaths))
+	fmt.Printf("  Linking %d LLVM IR files...\n", len(irPaths))
 
-	if err := mergeAndReplaceTailCalls(irPaths, mergedLL, config); err != nil {
-		fmt.Printf("Failed to merge IR files: %v\n", err)
+	linkArgs := []string{"-S", "-o", mergedLL, "--override"}
+	linkArgs = append(linkArgs, irPaths...)
+
+	llvmLinkCmd := exec.Command("llvm-link", linkArgs...)
+	llvmLinkCmd.Stdout = os.Stdout
+	llvmLinkCmd.Stderr = os.Stderr
+	if err := llvmLinkCmd.Run(); err != nil {
+		fmt.Printf("llvm-link failed: %v\n", err)
+		fmt.Println("Please ensure llvm-link is installed")
 		os.Exit(1)
 	}
 
