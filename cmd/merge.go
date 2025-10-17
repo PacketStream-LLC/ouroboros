@@ -480,7 +480,7 @@ func linkObjects(objectPaths []string, outputPath string) {
 	mergedLL := outputPath[:len(outputPath)-2] + ".ll" // Replace .o with .ll
 	fmt.Printf("  Linking %d LLVM IR files...\n", len(irPaths))
 
-	linkArgs := []string{"-S", "-o", mergedLL, "--override"}
+	linkArgs := []string{"-S", "-o", mergedLL, "--override", "--only-needed"}
 	linkArgs = append(linkArgs, irPaths...)
 
 	llvmLinkCmd := exec.Command("llvm-link", linkArgs...)
