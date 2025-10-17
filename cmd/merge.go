@@ -334,8 +334,14 @@ func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string
 				// Calculate offset to this symbol entry
 				entryOffset := symtabOffset + uint64(i)*symEntrySize
 
-				// Change st_shndx to SHN_UNDEF (0)
 				// Symbol entry: name(4) + info(1) + other(1) + shndx(2) + value(8) + size(8)
+
+				// Change st_info to STB_GLOBAL | STT_NOTYPE (0x10)
+				// This marks it as a global undefined symbol
+				infoOffset := entryOffset + 4
+				data[infoOffset] = byte(elf.STB_GLOBAL)<<4 | byte(elf.STT_NOTYPE)
+
+				// Change st_shndx to SHN_UNDEF (0)
 				shndxOffset := entryOffset + 6
 				binary.LittleEndian.PutUint16(data[shndxOffset:shndxOffset+2], uint16(elf.SHN_UNDEF))
 
@@ -345,7 +351,7 @@ func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string
 				binary.LittleEndian.PutUint64(data[valueOffset:valueOffset+8], 0)
 				binary.LittleEndian.PutUint64(data[sizeOffset:sizeOffset+8], 0)
 
-				fmt.Printf("    Converted '%s' to extern reference (SHN_UNDEF)\n", symName)
+				fmt.Printf("    Converted '%s' to extern reference (STB_GLOBAL|STT_NOTYPE, SHN_UNDEF)\n", symName)
 			}
 		}
 	}
