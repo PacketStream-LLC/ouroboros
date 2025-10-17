@@ -493,6 +493,13 @@ func linkObjects(objectPaths []string, outputPath string) {
 		os.Exit(1)
 	}
 
+	// Step 2.5: Replace tail calls in merged LLVM IR
+	fmt.Printf("  Replacing tail calls with direct function calls in IR...\n")
+	if err := replaceTailCallsInIR(mergedLL, config); err != nil {
+		fmt.Printf("Failed to replace tail calls: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Step 3: Compile merged LLVM IR to eBPF object
 	fmt.Printf("  Compiling merged LLVM IR to eBPF object...\n")
 
@@ -759,6 +766,149 @@ func resizeMapsSection(elfPath string) error {
 
 	// Write modified ELF
 	return os.WriteFile(elfPath, data, 0644)
+}
+
+// replaceTailCallsInIR replaces bpf_tail_call in LLVM IR with direct function calls
+func replaceTailCallsInIR(irPath string, config *OuroborosConfig) error {
+	// Read the merged IR file
+	data, err := os.ReadFile(irPath)
+	if err != nil {
+		return fmt.Errorf("failed to read IR file: %w", err)
+	}
+
+	lines := bytes.Split(data, []byte("\n"))
+
+	// Build program ID to function name map
+	progIDToName := make(map[int]string)
+	for _, prog := range config.Programs {
+		entrypoint := prog.Entrypoint
+		if entrypoint == "" {
+			entrypoint = prog.Name
+		}
+		progIDToName[prog.ID] = entrypoint
+	}
+
+	// Track pending replacements
+	type replacement struct {
+		lineIdx      int
+		targetFunc   string
+		programID    int
+	}
+	var replacements []replacement
+
+	// Parse IR to find tail calls
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+
+		// Look for tail call pattern:
+		// call i64 inttoptr (i64 12 to ptr)(ptr noundef nonnull %0, ptr noundef nonnull @hs_programs, i32 noundef 10200)
+		// Where 12 is the bpf_tail_call helper ID
+		if bytes.Contains(line, []byte("call i64 inttoptr (i64 12 to ptr)")) ||
+			bytes.Contains(line, []byte("call i64 inttoptr (i64 12")) {
+
+			// Validate second parameter is @hs_programs (or configured program map)
+			// Pattern: ptr noundef nonnull @hs_programs
+			expectedMapName := "@" + config.ProgramMap // Default program map name
+			if !bytes.Contains(line, []byte(expectedMapName)) {
+				// Check if it's a different program map - skip if not recognized
+				fmt.Printf("    Skipping tail call with unknown program map (not %s)\n", expectedMapName)
+				continue
+			}
+
+			// Extract the program ID from the third argument (i32 noundef <ID>)
+			// Pattern: i32 noundef <ID>)
+			parts := bytes.Split(line, []byte("i32 noundef "))
+			if len(parts) >= 2 {
+				// Get the last i32 argument (the program ID)
+				lastPart := parts[len(parts)-1]
+				endIdx := bytes.IndexAny(lastPart, ",)")
+				if endIdx > 0 {
+					idStr := string(bytes.TrimSpace(lastPart[:endIdx]))
+					var programID int
+					if _, err := fmt.Sscanf(idStr, "%d", &programID); err == nil {
+						if targetFunc, ok := progIDToName[programID]; ok {
+							fmt.Printf("    Found tail call to program ID %d (%s)\n", programID, targetFunc)
+							replacements = append(replacements, replacement{
+								lineIdx:    i,
+								targetFunc: targetFunc,
+								programID:  programID,
+							})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if len(replacements) == 0 {
+		fmt.Println("    No tail calls found to replace")
+		return nil
+	}
+
+	fmt.Printf("    Replacing %d tail calls...\n", len(replacements))
+
+	// Apply replacements
+	for _, repl := range replacements {
+		oldLine := lines[repl.lineIdx]
+
+		// Extract context pointer (first argument to tail call)
+		// Pattern: call i64 inttoptr (i64 12 to ptr)(ptr noundef nonnull %0, ...)
+		ctxStart := bytes.Index(oldLine, []byte("(ptr "))
+		if ctxStart == -1 {
+			ctxStart = bytes.Index(oldLine, []byte("(ptr noundef "))
+		}
+
+		var ctxName string
+		if ctxStart != -1 {
+			// Skip past the opening (ptr ...
+			if bytes.Contains(oldLine[ctxStart:ctxStart+20], []byte("noundef")) {
+				ctxStart = bytes.Index(oldLine[ctxStart:], []byte("noundef ")) + ctxStart + len("noundef ")
+			} else {
+				ctxStart += len("(ptr ")
+			}
+
+			// Skip "nonnull " if present
+			if bytes.HasPrefix(oldLine[ctxStart:], []byte("nonnull ")) {
+				ctxStart += len("nonnull ")
+			}
+
+			ctxEnd := bytes.IndexAny(oldLine[ctxStart:], ", )")
+			if ctxEnd > 0 {
+				ctxName = string(oldLine[ctxStart : ctxStart+ctxEnd])
+			}
+		}
+
+		if ctxName == "" {
+			ctxName = "%0" // fallback
+		}
+
+		// Get indentation
+		indent := []byte{}
+		for _, b := range oldLine {
+			if b == ' ' || b == '\t' {
+				indent = append(indent, b)
+			} else {
+				break
+			}
+		}
+
+		// Replace with direct function call
+		// From: call i64 inttoptr (i64 12 to ptr)(ptr noundef nonnull %0, ptr noundef nonnull @hs_programs, i32 noundef 10200)
+		// To:   call void @target_function(ptr %0)
+		newLine := fmt.Sprintf("%scall void @%s(ptr %s)", string(indent), repl.targetFunc, ctxName)
+
+		lines[repl.lineIdx] = []byte(newLine)
+		fmt.Printf("      Replaced tail call to %s (ID %d)\n", repl.targetFunc, repl.programID)
+	}
+
+	// Write modified IR back
+	modifiedData := bytes.Join(lines, []byte("\n"))
+	if err := os.WriteFile(irPath, modifiedData, 0644); err != nil {
+		return fmt.Errorf("failed to write modified IR: %w", err)
+	}
+
+	fmt.Printf("    Successfully replaced %d tail calls\n", len(replacements))
+	return nil
 }
 
 func replaceTailCallsWithJumps(objectPath string, prog *Program, config *OuroborosConfig) {
