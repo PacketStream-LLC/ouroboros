@@ -341,10 +341,14 @@ func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string
 				// Keep section and type unchanged so relocations still work
 				infoOffset := entryOffset + 4
 				currentInfo := data[infoOffset]
+				currentBind := elf.ST_BIND(currentInfo)
 				symType := currentInfo & 0x0F // Keep type (STT_OBJECT for maps)
-				data[infoOffset] = byte(elf.STB_LOCAL)<<4 | symType
+				newInfo := byte(elf.STB_LOCAL)<<4 | symType
+				data[infoOffset] = newInfo
 
 				fmt.Printf("    Converted '%s' to local binding (STB_LOCAL)\n", symName)
+				fmt.Printf("      Symbol #%d at offset 0x%x: info byte 0x%02x (bind=%d type=%d) -> 0x%02x (bind=%d type=%d)\n",
+					i, infoOffset, currentInfo, currentBind, symType, newInfo, elf.STB_LOCAL, symType)
 			}
 		}
 	}
