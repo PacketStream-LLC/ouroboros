@@ -15,7 +15,7 @@ struct {
     __uint(max_entries, PROG_MAX_ENTRIES);
     __type(key, __u32);
     __type(value, __u32);
-} PROG_MAP_NAME SEC(".maps");
+} PROG_MAP_NAME __weak SEC(".maps");
 
 #define __STRINGIFY(x) #x
 
