@@ -257,6 +257,9 @@ func deduplicateMapSymbols(objectPaths []string) ([]string, error) {
 				fmt.Printf("    Checking symbol '%s': duplicate=%v\n", sym.Name, seenSymbols[sym.Name])
 				if seenSymbols[sym.Name] {
 					duplicates = append(duplicates, sym.Name)
+				} else {
+					// Track this symbol for future files
+					seenSymbols[sym.Name] = true
 				}
 			}
 		}
