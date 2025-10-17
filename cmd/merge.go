@@ -333,7 +333,9 @@ func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string
 		for _, symName := range symbolsToRemove {
 			if sym.Name == symName && sym.Section == mapsSectionIndex {
 				// Calculate offset to this symbol entry
-				entryOffset := symtabOffset + uint64(i)*symEntrySize
+				// NOTE: elfFile.Symbols() skips the NULL symbol at index 0,
+				// so we need to add 1 to get the actual symbol index in the file
+				entryOffset := symtabOffset + uint64(i+1)*symEntrySize
 
 				// Symbol entry: name(4) + info(1) + other(1) + shndx(2) + value(8) + size(8)
 
@@ -348,7 +350,7 @@ func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string
 
 				fmt.Printf("    Converted '%s' to local binding (STB_LOCAL)\n", symName)
 				fmt.Printf("      Symbol #%d at offset 0x%x: info byte 0x%02x (bind=%d type=%d) -> 0x%02x (bind=%d type=%d)\n",
-					i, infoOffset, currentInfo, currentBind, symType, newInfo, elf.STB_LOCAL, symType)
+					i+1, infoOffset, currentInfo, currentBind, symType, newInfo, elf.STB_LOCAL, symType)
 			}
 		}
 	}
