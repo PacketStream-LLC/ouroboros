@@ -285,7 +285,7 @@ func deduplicateMapSymbols(objectPaths []string) ([]string, error) {
 	return dedupedPaths, nil
 }
 
-// removeSymbolsFromELF converts duplicate map symbols to extern (undefined) references
+// removeSymbolsFromELF converts duplicate map symbols to STB_LOCAL and reorders the symbol table
 func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string) error {
 	// Read the ELF file
 	data, err := os.ReadFile(inputPath)
@@ -328,34 +328,93 @@ func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string
 		}
 	}
 
-	// Modify symbol table entries: remove duplicate symbols completely
-	// Make them undefined references (SHN_UNDEF) with size 0
 	symtabOffset := symtabSection.Offset
 	symEntrySize := uint64(24) // 64-bit ELF symbol table entry size
 
+	// Mark which symbols to convert to local
+	symbolsToConvert := make(map[int]bool)
 	for i, sym := range symbols {
 		for _, symName := range symbolsToRemove {
 			if sym.Name == symName && sym.Section == mapsSectionIndex {
-				// Calculate offset to this symbol entry
-				// NOTE: elfFile.Symbols() skips the NULL symbol at index 0,
-				// so we need to add 1 to get the actual symbol index in the file
-				entryOffset := symtabOffset + uint64(i+1)*symEntrySize
-
-				// Symbol entry structure (24 bytes for ELF64):
-				// name(4) + info(1) + other(1) + shndx(2) + value(8) + size(8)
-
-				// Zero out the entire symbol entry to make it like NULL
-				for j := uint64(0); j < symEntrySize; j++ {
-					data[entryOffset+j] = 0
-				}
-
-				// Keep the name index (first 4 bytes) so we can see what it was
-				// Actually, let's completely zero it to avoid any issues
-
-				fmt.Printf("    Removed symbol '%s' (zeroed out symbol #%d)\n", symName, i+1)
+				symbolsToConvert[i] = true
+				fmt.Printf("    Will convert '%s' (symbol #%d) to STB_LOCAL\n", symName, i+1)
 			}
 		}
 	}
+
+	// Read all symbol table entries
+	symbolEntries := make([][]byte, len(symbols)+1) // +1 for NULL symbol at index 0
+
+	// Read NULL symbol
+	nullSymOffset := symtabOffset
+	symbolEntries[0] = make([]byte, symEntrySize)
+	copy(symbolEntries[0], data[nullSymOffset:nullSymOffset+symEntrySize])
+
+	// Read all other symbols
+	for i := range symbols {
+		entryOffset := symtabOffset + uint64(i+1)*symEntrySize
+		symbolEntries[i+1] = make([]byte, symEntrySize)
+		copy(symbolEntries[i+1], data[entryOffset:entryOffset+symEntrySize])
+	}
+
+	// Convert marked symbols to STB_LOCAL
+	for i := range symbols {
+		if symbolsToConvert[i] {
+			infoOffset := 4 // info is at byte 4 in symbol entry
+			currentInfo := symbolEntries[i+1][infoOffset]
+			symType := currentInfo & 0x0F
+			newInfo := byte(elf.STB_LOCAL)<<4 | symType
+			symbolEntries[i+1][infoOffset] = newInfo
+		}
+	}
+
+	// Reorder: NULL + all LOCAL symbols + all GLOBAL/WEAK symbols
+	reorderedEntries := make([][]byte, 0, len(symbolEntries))
+	reorderedEntries = append(reorderedEntries, symbolEntries[0]) // NULL symbol first
+
+	// Add all LOCAL symbols
+	for i := 1; i < len(symbolEntries); i++ {
+		info := symbolEntries[i][4]
+		bind := elf.ST_BIND(info)
+		if bind == elf.STB_LOCAL {
+			reorderedEntries = append(reorderedEntries, symbolEntries[i])
+		}
+	}
+
+	firstGlobalIndex := len(reorderedEntries)
+
+	// Add all GLOBAL/WEAK symbols
+	for i := 1; i < len(symbolEntries); i++ {
+		info := symbolEntries[i][4]
+		bind := elf.ST_BIND(info)
+		if bind == elf.STB_GLOBAL || bind == elf.STB_WEAK {
+			reorderedEntries = append(reorderedEntries, symbolEntries[i])
+		}
+	}
+
+	// Write reordered symbol table back
+	writeOffset := symtabOffset
+	for _, entry := range reorderedEntries {
+		copy(data[writeOffset:writeOffset+symEntrySize], entry)
+		writeOffset += symEntrySize
+	}
+
+	// Update sh_info in .symtab section header
+	var symtabSectionIndex int
+	for i, section := range elfFile.Sections {
+		if section.Type == elf.SHT_SYMTAB {
+			symtabSectionIndex = i
+			break
+		}
+	}
+
+	shoff := binary.LittleEndian.Uint64(data[40:48])
+	symtabShdrOffset := shoff + uint64(symtabSectionIndex)*64
+	shInfoOffset := symtabShdrOffset + 44
+
+	fmt.Printf("    Reordered symbol table: %d local, %d global (sh_info=%d)\n",
+		firstGlobalIndex-1, len(reorderedEntries)-firstGlobalIndex, firstGlobalIndex)
+	binary.LittleEndian.PutUint32(data[shInfoOffset:shInfoOffset+4], uint32(firstGlobalIndex))
 
 	// Write modified ELF
 	return os.WriteFile(outputPath, data, 0644)
