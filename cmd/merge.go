@@ -337,22 +337,14 @@ func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string
 
 				// Symbol entry: name(4) + info(1) + other(1) + shndx(2) + value(8) + size(8)
 
-				// Change st_info to STB_GLOBAL | STT_NOTYPE (0x10)
-				// This marks it as a global undefined symbol
+				// Change binding from STB_GLOBAL to STB_LOCAL
+				// Keep section and type unchanged so relocations still work
 				infoOffset := entryOffset + 4
-				data[infoOffset] = byte(elf.STB_GLOBAL)<<4 | byte(elf.STT_NOTYPE)
+				currentInfo := data[infoOffset]
+				symType := currentInfo & 0x0F // Keep type (STT_OBJECT for maps)
+				data[infoOffset] = byte(elf.STB_LOCAL)<<4 | symType
 
-				// Change st_shndx to SHN_UNDEF (0)
-				shndxOffset := entryOffset + 6
-				binary.LittleEndian.PutUint16(data[shndxOffset:shndxOffset+2], uint16(elf.SHN_UNDEF))
-
-				// Set value and size to 0 for undefined symbols
-				valueOffset := entryOffset + 8
-				sizeOffset := entryOffset + 16
-				binary.LittleEndian.PutUint64(data[valueOffset:valueOffset+8], 0)
-				binary.LittleEndian.PutUint64(data[sizeOffset:sizeOffset+8], 0)
-
-				fmt.Printf("    Converted '%s' to extern reference (STB_GLOBAL|STT_NOTYPE, SHN_UNDEF)\n", symName)
+				fmt.Printf("    Converted '%s' to local binding (STB_LOCAL)\n", symName)
 			}
 		}
 	}
