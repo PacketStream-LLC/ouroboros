@@ -254,6 +254,7 @@ func deduplicateMapSymbols(objectPaths []string) ([]string, error) {
 		duplicates := []string{}
 		for _, sym := range symbols {
 			if sym.Name != "" && elf.ST_BIND(sym.Info) == elf.STB_GLOBAL {
+				fmt.Printf("    Checking symbol '%s': duplicate=%v\n", sym.Name, seenSymbols[sym.Name])
 				if seenSymbols[sym.Name] {
 					duplicates = append(duplicates, sym.Name)
 				}
