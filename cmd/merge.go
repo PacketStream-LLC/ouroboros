@@ -193,46 +193,21 @@ func collectTailCallTargets(prog *Program, config *OuroborosConfig, visited map[
 func linkObjects(objectPaths []string, outputPath string) {
 	fmt.Printf("Linking %d objects into %s...\n", len(objectPaths), outputPath)
 
-	// Use llvm-link to combine object files
-	args := []string{"-o", outputPath}
+	// Use bpftool to link BPF object files
+	// bpftool gen object <output> <input1.o> <input2.o> ...
+	args := []string{"gen", "object", outputPath}
 	args = append(args, objectPaths...)
 
-	linkCmd := exec.Command("llvm-link", args...)
+	linkCmd := exec.Command("bpftool", args...)
 	linkCmd.Stdout = os.Stdout
 	linkCmd.Stderr = os.Stderr
 	if err := linkCmd.Run(); err != nil {
-		fmt.Printf("llvm-link failed, trying alternative method with bpftool: %v\n", err)
-		// Fallback to manual merging with bpftool if llvm-link fails
-		linkObjectsWithBpftool(objectPaths, outputPath)
-		return
+		fmt.Printf("bpftool linking failed: %v\n", err)
+		fmt.Println("Please ensure bpftool is installed and available in PATH")
+		os.Exit(1)
 	}
 
 	fmt.Println("Linking complete.")
-}
-
-func linkObjectsWithBpftool(objectPaths []string, outputPath string) {
-	// Create a temporary directory for intermediate files
-	tmpDir, err := os.MkdirTemp("", "ouroboros-merge-*")
-	if err != nil {
-		fmt.Printf("Failed to create temp directory: %v\n", err)
-		os.Exit(1)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Load each object and extract sections
-	fmt.Println("Using bpftool for merging (fallback method)...")
-
-	// For now, just copy the first object as base
-	// In a real implementation, we'd need to properly merge sections
-	firstObj := objectPaths[0]
-	cpCmd := exec.Command("cp", firstObj, outputPath)
-	if err := cpCmd.Run(); err != nil {
-		fmt.Printf("Failed to copy base object: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Println("Note: Advanced merging with bpftool not yet fully implemented.")
-	fmt.Println("Using first object as base. For complex merging, ensure llvm-link is available.")
 }
 
 func replaceTailCallsWithJumps(objectPath string, prog *Program, config *OuroborosConfig) {
