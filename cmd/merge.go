@@ -309,10 +309,19 @@ func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string
 		return err
 	}
 
+	// Find .maps section index
+	var mapsSectionIndex elf.SectionIndex
+	for i, section := range elfFile.Sections {
+		if section.Name == ".maps" {
+			mapsSectionIndex = elf.SectionIndex(i)
+			break
+		}
+	}
+
 	// Find the offset and size of each duplicate map in .maps section
 	for _, sym := range symbols {
 		for _, symName := range symbolsToRemove {
-			if sym.Name == symName && sym.Section == elf.SectionIndex(mapsSection.SectionIndex) {
+			if sym.Name == symName && sym.Section == mapsSectionIndex {
 				// Zero out this map's data in .maps section
 				mapOffset := mapsSection.Offset + sym.Value
 				mapSize := sym.Size
