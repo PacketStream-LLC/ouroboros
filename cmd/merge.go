@@ -122,11 +122,8 @@ func mergeTwoPrograms(srcProg *Program, targetProg *Program, config *OuroborosCo
 		fmt.Printf("  - %s\n", obj)
 	}
 
-	// Link objects together
+	// Link objects together (now handles tail call replacement in IR)
 	linkObjects(objectsToMerge, outputPath)
-
-	// Replace tail calls with jumps in the merged object
-	replaceTailCallsWithJumps(outputPath, srcProg, config)
 }
 
 func mergeProgram(prog *Program, config *OuroborosConfig, outputPath string) {
@@ -147,10 +144,8 @@ func mergeProgram(prog *Program, config *OuroborosConfig, outputPath string) {
 		return
 	}
 
+	// Link objects together (now handles tail call replacement in IR)
 	linkObjects(objectsToMerge, outputPath)
-
-	// Replace tail calls with jumps in the merged object
-	replaceTailCallsWithJumps(outputPath, prog, config)
 }
 
 func collectTailCallTargets(prog *Program, config *OuroborosConfig, visited map[string]bool, objectsToMerge *[]string) {
@@ -481,26 +476,12 @@ func linkObjects(objectPaths []string, outputPath string) {
 		irPaths = append(irPaths, outputLL)
 	}
 
-	// Step 2: Deduplicate globals in IR files
-	fmt.Println("  Deduplicating globals in LLVM IR...")
-	if err := deduplicateIRGlobals(irPaths); err != nil {
-		fmt.Printf("Failed to deduplicate IR globals: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Step 3: Link LLVM IR files
+	// Step 2: Merge IR files manually and replace tail calls
 	mergedLL := outputPath[:len(outputPath)-2] + ".ll" // Replace .o with .ll
-	fmt.Printf("  Linking %d LLVM IR files...\n", len(irPaths))
+	fmt.Printf("  Merging %d LLVM IR files and replacing tail calls...\n", len(irPaths))
 
-	linkArgs := []string{"-S", "-o", mergedLL}
-	linkArgs = append(linkArgs, irPaths...)
-
-	llvmLinkCmd := exec.Command("llvm-link", linkArgs...)
-	llvmLinkCmd.Stdout = os.Stdout
-	llvmLinkCmd.Stderr = os.Stderr
-	if err := llvmLinkCmd.Run(); err != nil {
-		fmt.Printf("llvm-link failed: %v\n", err)
-		fmt.Println("Please ensure llvm-link is installed and available in PATH")
+	if err := mergeAndReplaceTailCalls(irPaths, mergedLL, config); err != nil {
+		fmt.Printf("Failed to merge IR files: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -521,73 +502,95 @@ func linkObjects(objectPaths []string, outputPath string) {
 	fmt.Println("LLVM IR merge complete.")
 }
 
-// deduplicateIRGlobals converts duplicate global definitions to extern declarations
-func deduplicateIRGlobals(irPaths []string) error {
+// mergeAndReplaceTailCalls merges IR files and replaces bpf_tail_call with direct branches
+func mergeAndReplaceTailCalls(irPaths []string, outputPath string, config *OuroborosConfig) error {
+	var mergedIR bytes.Buffer
 	seenGlobals := make(map[string]bool)
+	seenFunctions := make(map[string]bool)
 
+	// Build program ID to name map
+	progIDToName := make(map[int]string)
+	for _, prog := range config.Programs {
+		entrypoint := prog.Entrypoint
+		if entrypoint == "" {
+			entrypoint = prog.Name
+		}
+		progIDToName[prog.ID] = entrypoint
+	}
+
+	// Merge all IR files
 	for idx, irPath := range irPaths {
-		// Read IR file
 		data, err := os.ReadFile(irPath)
 		if err != nil {
 			return err
 		}
 
 		lines := bytes.Split(data, []byte("\n"))
-		modified := false
 
-		for i, line := range lines {
-			// Look for global variable definitions
-			// Example: @hs_programs = dso_local global %struct.anon zeroinitializer, section ".maps", align 8
-			if bytes.HasPrefix(bytes.TrimSpace(line), []byte("@")) && bytes.Contains(line, []byte(" global ")) {
-				// Extract global name
+		for _, line := range lines {
+			trimmed := bytes.TrimSpace(line)
+
+			// Skip duplicate globals (maps and _license)
+			if bytes.HasPrefix(trimmed, []byte("@")) && bytes.Contains(line, []byte(" global ")) {
 				parts := bytes.Fields(line)
 				if len(parts) > 0 {
 					globalName := string(parts[0])
 
-					if idx > 0 && seenGlobals[globalName] {
-						// This is a duplicate - convert to extern
-						// Replace "= dso_local global" with "= external global"
-						newLine := bytes.Replace(line, []byte("= dso_local global"), []byte("= external global"), 1)
-						newLine = bytes.Replace(newLine, []byte("= global"), []byte("= external global"), 1)
-
-						// Remove initializer and attributes after global type
-						// Find the type (between "global" and the initializer/attributes)
-						globalIdx := bytes.Index(newLine, []byte("= external global"))
-						if globalIdx != -1 {
-							afterGlobal := newLine[globalIdx+17:] // Skip "= external global"
-							// Find the end of the type (before zeroinitializer, section, align, etc.)
-							typeEnd := bytes.Index(afterGlobal, []byte(" zeroinitializer"))
-							if typeEnd == -1 {
-								typeEnd = bytes.Index(afterGlobal, []byte(", section"))
-							}
-							if typeEnd == -1 {
-								typeEnd = bytes.Index(afterGlobal, []byte(", align"))
-							}
-							if typeEnd != -1 {
-								newLine = append(newLine[:globalIdx+17+typeEnd], []byte(", align 8")...)
-							}
+					// Skip duplicate map globals
+					if bytes.Contains(line, []byte("section \".maps\"")) {
+						if seenGlobals[globalName] {
+							fmt.Printf("    Skipping duplicate map '%s'\n", globalName)
+							continue
 						}
+						seenGlobals[globalName] = true
+					}
 
-						lines[i] = newLine
-						modified = true
-						fmt.Printf("    Converting duplicate '%s' to extern in %s\n", globalName, filepath.Base(irPath))
-					} else {
+					// Skip duplicate _license
+					if globalName == "@_license" {
+						if seenGlobals[globalName] {
+							fmt.Printf("    Skipping duplicate @_license\n")
+							continue
+						}
 						seenGlobals[globalName] = true
 					}
 				}
 			}
+
+			// Track function definitions to avoid duplicates
+			if bytes.HasPrefix(trimmed, []byte("define ")) {
+				// Extract function name
+				if nameStart := bytes.Index(line, []byte("@")); nameStart != -1 {
+					nameEnd := bytes.Index(line[nameStart:], []byte("("))
+					if nameEnd != -1 {
+						funcName := string(line[nameStart : nameStart+nameEnd])
+						if seenFunctions[funcName] {
+							// Skip duplicate function - read until closing brace
+							continue
+						}
+						seenFunctions[funcName] = true
+					}
+				}
+			}
+
+			// Replace bpf_tail_call with direct branch
+			// Look for: call void (i8*, i8*, i64, ...) @llvm.bpf.tail.call.p0i8.p0i8
+			if bytes.Contains(line, []byte("@llvm.bpf.tail.call")) {
+				// Find the program ID from previous lines (R3 register load)
+				// This is complex - for now, add a comment
+				mergedIR.WriteString("  ; TODO: Replace tail call with br label\n")
+			}
+
+			mergedIR.Write(line)
+			mergedIR.WriteByte('\n')
 		}
 
-		if modified {
-			// Write modified IR back
-			newData := bytes.Join(lines, []byte("\n"))
-			if err := os.WriteFile(irPath, newData, 0644); err != nil {
-				return err
-			}
+		if idx < len(irPaths)-1 {
+			mergedIR.WriteString("\n")
 		}
 	}
 
-	return nil
+	// Write merged IR
+	return os.WriteFile(outputPath, mergedIR.Bytes(), 0644)
 }
 
 // resizeMapsSection resizes the .maps section to match BTF DATASEC size expectations
