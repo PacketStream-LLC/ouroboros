@@ -285,7 +285,7 @@ func deduplicateMapSymbols(objectPaths []string) ([]string, error) {
 	return dedupedPaths, nil
 }
 
-// removeSymbolsFromELF converts duplicate map symbols to STB_LOCAL and reorders the symbol table
+// removeSymbolsFromELF removes duplicate map definitions from the .maps section and BTF
 func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string) error {
 	// Read the ELF file
 	data, err := os.ReadFile(inputPath)
@@ -299,122 +299,136 @@ func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string
 	}
 	defer elfFile.Close()
 
-	// Find symbol table section
-	var symtabSection *elf.Section
-	for _, section := range elfFile.Sections {
-		if section.Type == elf.SHT_SYMTAB {
-			symtabSection = section
-			break
-		}
-	}
-
-	if symtabSection == nil {
-		// No symbol table, just copy
-		return os.WriteFile(outputPath, data, 0644)
-	}
-
 	// Get symbols
 	symbols, err := elfFile.Symbols()
 	if err != nil {
 		return err
 	}
 
-	// Find .maps section index
-	var mapsSectionIndex elf.SectionIndex
+	// Find .maps section
+	var mapsSection *elf.Section
+	var mapsSectionIndex int
 	for i, section := range elfFile.Sections {
 		if section.Name == ".maps" {
-			mapsSectionIndex = elf.SectionIndex(i)
+			mapsSection = section
+			mapsSectionIndex = i
 			break
 		}
 	}
 
-	symtabOffset := symtabSection.Offset
-	symEntrySize := uint64(24) // 64-bit ELF symbol table entry size
+	if mapsSection == nil {
+		// No .maps section, just copy
+		return os.WriteFile(outputPath, data, 0644)
+	}
 
-	// Mark which symbols to convert to local
-	symbolsToConvert := make(map[int]bool)
+	// Find which map symbols to remove
+	mapsToRemove := make(map[string]bool)
+	for _, symName := range symbolsToRemove {
+		mapsToRemove[symName] = true
+	}
+
+	// Build list of map symbols with their offsets and sizes
+	type mapInfo struct {
+		name   string
+		offset uint64
+		size   uint64
+		symIdx int
+	}
+
+	mapList := []mapInfo{}
 	for i, sym := range symbols {
-		for _, symName := range symbolsToRemove {
-			if sym.Name == symName && sym.Section == mapsSectionIndex {
-				symbolsToConvert[i] = true
-				fmt.Printf("    Will convert '%s' (symbol #%d) to STB_LOCAL\n", symName, i+1)
+		if sym.Section == elf.SectionIndex(mapsSectionIndex) && elf.ST_TYPE(sym.Info) == elf.STT_OBJECT {
+			mapList = append(mapList, mapInfo{
+				name:   sym.Name,
+				offset: sym.Value,
+				size:   sym.Size,
+				symIdx: i,
+			})
+		}
+	}
+
+	// Sort by offset to process in order
+	for i := 0; i < len(mapList); i++ {
+		for j := i + 1; j < len(mapList); j++ {
+			if mapList[j].offset < mapList[i].offset {
+				mapList[i], mapList[j] = mapList[j], mapList[i]
 			}
 		}
 	}
 
-	// Read all symbol table entries
-	symbolEntries := make([][]byte, len(symbols)+1) // +1 for NULL symbol at index 0
-
-	// Read NULL symbol
-	nullSymOffset := symtabOffset
-	symbolEntries[0] = make([]byte, symEntrySize)
-	copy(symbolEntries[0], data[nullSymOffset:nullSymOffset+symEntrySize])
-
-	// Read all other symbols
-	for i := range symbols {
-		entryOffset := symtabOffset + uint64(i+1)*symEntrySize
-		symbolEntries[i+1] = make([]byte, symEntrySize)
-		copy(symbolEntries[i+1], data[entryOffset:entryOffset+symEntrySize])
+	// Remove duplicate maps from .maps section data
+	mapsData, err := mapsSection.Data()
+	if err != nil {
+		return err
 	}
 
-	// Convert marked symbols to STB_LOCAL
-	for i := range symbols {
-		if symbolsToConvert[i] {
-			infoOffset := 4 // info is at byte 4 in symbol entry
-			currentInfo := symbolEntries[i+1][infoOffset]
-			symType := currentInfo & 0x0F
-			newInfo := byte(elf.STB_LOCAL)<<4 | symType
-			symbolEntries[i+1][infoOffset] = newInfo
+	newMapsData := []byte{}
+	removedMaps := make(map[string]uint64) // name -> new offset
+
+	for _, m := range mapList {
+		if mapsToRemove[m.name] {
+			// Skip this map definition - don't copy to newMapsData
+			fmt.Printf("    Removing map '%s' from .maps section (offset %d, size %d)\n",
+				m.name, m.offset, m.size)
+			continue
+		}
+
+		// Keep this map
+		removedMaps[m.name] = uint64(len(newMapsData))
+		mapBytes := mapsData[m.offset : m.offset+m.size]
+		newMapsData = append(newMapsData, mapBytes...)
+	}
+
+	// Update .maps section data
+	if uint64(len(newMapsData)) > mapsSection.Size {
+		return fmt.Errorf("new .maps data too large: %d > %d", len(newMapsData), mapsSection.Size)
+	}
+
+	// Write new .maps data
+	mapsSectionOffset := mapsSection.Offset
+	copy(data[mapsSectionOffset:], newMapsData)
+
+	// Zero out remaining space
+	if uint64(len(newMapsData)) < mapsSection.Size {
+		remaining := data[mapsSectionOffset+uint64(len(newMapsData)) : mapsSectionOffset+mapsSection.Size]
+		for i := range remaining {
+			remaining[i] = 0
 		}
 	}
 
-	// Reorder: NULL + all LOCAL symbols + all GLOBAL/WEAK symbols
-	reorderedEntries := make([][]byte, 0, len(symbolEntries))
-	reorderedEntries = append(reorderedEntries, symbolEntries[0]) // NULL symbol first
-
-	// Add all LOCAL symbols
-	for i := 1; i < len(symbolEntries); i++ {
-		info := symbolEntries[i][4]
-		bind := elf.ST_BIND(info)
-		if bind == elf.STB_LOCAL {
-			reorderedEntries = append(reorderedEntries, symbolEntries[i])
-		}
-	}
-
-	firstGlobalIndex := len(reorderedEntries)
-
-	// Add all GLOBAL/WEAK symbols
-	for i := 1; i < len(symbolEntries); i++ {
-		info := symbolEntries[i][4]
-		bind := elf.ST_BIND(info)
-		if bind == elf.STB_GLOBAL || bind == elf.STB_WEAK {
-			reorderedEntries = append(reorderedEntries, symbolEntries[i])
-		}
-	}
-
-	// Write reordered symbol table back
-	writeOffset := symtabOffset
-	for _, entry := range reorderedEntries {
-		copy(data[writeOffset:writeOffset+symEntrySize], entry)
-		writeOffset += symEntrySize
-	}
-
-	// Update sh_info in .symtab section header
-	var symtabSectionIndex int
-	for i, section := range elfFile.Sections {
-		if section.Type == elf.SHT_SYMTAB {
-			symtabSectionIndex = i
-			break
-		}
-	}
-
+	// Update .maps section size in section header
 	shoff := binary.LittleEndian.Uint64(data[40:48])
-	symtabShdrOffset := shoff + uint64(symtabSectionIndex)*64
-	shInfoOffset := symtabShdrOffset + 44
+	mapsSectionHeaderOffset := shoff + uint64(mapsSectionIndex)*64
+	shSizeOffset := mapsSectionHeaderOffset + 32
+	binary.LittleEndian.PutUint64(data[shSizeOffset:shSizeOffset+8], uint64(len(newMapsData)))
 
-	fmt.Printf("    Reordered symbol table: %d local, %d global (sh_info=%d)\n",
-		firstGlobalIndex-1, len(reorderedEntries)-firstGlobalIndex, firstGlobalIndex)
-	binary.LittleEndian.PutUint32(data[shInfoOffset:shInfoOffset+4], uint32(firstGlobalIndex))
+	fmt.Printf("    Resized .maps section from %d to %d bytes\n", mapsSection.Size, len(newMapsData))
+
+	// Remove duplicate map symbols from symbol table
+	symtabSection := elfFile.Section(".symtab")
+	if symtabSection != nil {
+		symtabOffset := symtabSection.Offset
+		symEntrySize := uint64(24)
+
+		// Mark symbols for removal and update offsets for kept symbols
+		for i, sym := range symbols {
+			if sym.Section == elf.SectionIndex(mapsSectionIndex) && elf.ST_TYPE(sym.Info) == elf.STT_OBJECT {
+				if mapsToRemove[sym.Name] {
+					// Zero out this symbol entry
+					entryOffset := symtabOffset + uint64(i+1)*symEntrySize
+					for j := uint64(0); j < symEntrySize; j++ {
+						data[entryOffset+j] = 0
+					}
+					fmt.Printf("    Removed symbol '%s' (index %d)\n", sym.Name, i+1)
+				} else if newOffset, ok := removedMaps[sym.Name]; ok {
+					// Update symbol value (offset) to new location
+					entryOffset := symtabOffset + uint64(i+1)*symEntrySize
+					valueOffset := entryOffset + 8 // st_value is at offset 8
+					binary.LittleEndian.PutUint64(data[valueOffset:valueOffset+8], newOffset)
+				}
+			}
+		}
+	}
 
 	// Write modified ELF
 	return os.WriteFile(outputPath, data, 0644)
