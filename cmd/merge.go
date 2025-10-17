@@ -452,6 +452,96 @@ func linkObjects(objectPaths []string, outputPath string) {
 	}
 
 	fmt.Println("Linking complete.")
+
+	// Resize .maps section to match BTF expectations
+	if err := resizeMapsSection(outputPath); err != nil {
+		fmt.Printf("Failed to resize .maps section: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// resizeMapsSection resizes the .maps section to match BTF DATASEC size expectations
+func resizeMapsSection(elfPath string) error {
+	fmt.Println("Checking .maps section size...")
+
+	// Read the ELF file
+	data, err := os.ReadFile(elfPath)
+	if err != nil {
+		return err
+	}
+
+	elfFile, err := elf.NewFile(bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	defer elfFile.Close()
+
+	// Find .maps section
+	var mapsSection *elf.Section
+	var mapsSectionIndex int
+	for i, section := range elfFile.Sections {
+		if section.Name == ".maps" {
+			mapsSection = section
+			mapsSectionIndex = i
+			break
+		}
+	}
+
+	if mapsSection == nil {
+		return fmt.Errorf(".maps section not found")
+	}
+
+	// Parse BTF to find expected .maps size
+	// Use bpftool to get BTF info
+	cmd := exec.Command("bpftool", "btf", "dump", "file", elfPath, "format", "raw")
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to dump BTF: %w", err)
+	}
+
+	// Parse output to find DATASEC '.maps' size
+	var expectedSize uint64
+	lines := bytes.Split(output, []byte("\n"))
+	for _, line := range lines {
+		if bytes.Contains(line, []byte("DATASEC '.maps'")) {
+			// Parse: [484] DATASEC '.maps' size=5840 vlen=24
+			parts := bytes.Fields(line)
+			for _, part := range parts {
+				if bytes.HasPrefix(part, []byte("size=")) {
+					sizeStr := string(bytes.TrimPrefix(part, []byte("size=")))
+					fmt.Sscanf(sizeStr, "%d", &expectedSize)
+					break
+				}
+			}
+			break
+		}
+	}
+
+	if expectedSize == 0 {
+		fmt.Println("  No BTF DATASEC for .maps, keeping current size")
+		return nil
+	}
+
+	currentSize := mapsSection.Size
+	fmt.Printf("  Current .maps size: %d bytes, BTF expects: %d bytes\n", currentSize, expectedSize)
+
+	if currentSize == expectedSize {
+		fmt.Println("  .maps section size already matches BTF")
+		return nil
+	}
+
+	// Resize the .maps section in the ELF file
+	// Update section header sh_size field
+	shoff := binary.LittleEndian.Uint64(data[40:48])
+	mapsSectionHeaderOffset := shoff + uint64(mapsSectionIndex)*64
+	shSizeOffset := mapsSectionHeaderOffset + 32 // sh_size is at offset 32 in section header
+
+	binary.LittleEndian.PutUint64(data[shSizeOffset:shSizeOffset+8], expectedSize)
+
+	fmt.Printf("  Resized .maps section from %d to %d bytes\n", currentSize, expectedSize)
+
+	// Write modified ELF
+	return os.WriteFile(elfPath, data, 0644)
 }
 
 func replaceTailCallsWithJumps(objectPath string, prog *Program, config *OuroborosConfig) {
