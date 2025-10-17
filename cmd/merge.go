@@ -190,13 +190,128 @@ func collectTailCallTargets(prog *Program, config *OuroborosConfig, visited map[
 	}
 }
 
+// deduplicateMapSymbols removes duplicate symbols from object files
+// keeping only definitions from the first file
+func deduplicateMapSymbols(objectPaths []string) ([]string, error) {
+	if len(objectPaths) <= 1 {
+		return objectPaths, nil
+	}
+
+	fmt.Println("Deduplicating symbols...")
+
+	// First file is the source - keep all its symbols
+	seenSymbols := make(map[string]bool)
+
+	// Read symbols from first file
+	firstData, err := os.ReadFile(objectPaths[0])
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s: %w", objectPaths[0], err)
+	}
+
+	firstElf, err := elf.NewFile(bytes.NewReader(firstData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse ELF %s: %w", objectPaths[0], err)
+	}
+
+	firstSymbols, err := firstElf.Symbols()
+	if err != nil {
+		firstElf.Close()
+		return nil, fmt.Errorf("failed to read symbols from %s: %w", objectPaths[0], err)
+	}
+
+	// Track all global symbols from first file
+	for _, sym := range firstSymbols {
+		if sym.Name != "" && elf.ST_BIND(sym.Info) == elf.STB_GLOBAL {
+			seenSymbols[sym.Name] = true
+		}
+	}
+	firstElf.Close()
+
+	fmt.Printf("  Source file %s: keeping all %d global symbols\n", filepath.Base(objectPaths[0]), len(seenSymbols))
+
+	dedupedPaths := make([]string, 0, len(objectPaths))
+	dedupedPaths = append(dedupedPaths, objectPaths[0]) // Keep first as-is
+
+	// Process remaining files
+	for _, objPath := range objectPaths[1:] {
+		data, err := os.ReadFile(objPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s: %w", objPath, err)
+		}
+
+		elfFile, err := elf.NewFile(bytes.NewReader(data))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse ELF %s: %w", objPath, err)
+		}
+
+		symbols, err := elfFile.Symbols()
+		if err != nil {
+			elfFile.Close()
+			return nil, fmt.Errorf("failed to read symbols from %s: %w", objPath, err)
+		}
+
+		// Find duplicate global symbols
+		duplicates := []string{}
+		for _, sym := range symbols {
+			if sym.Name != "" && elf.ST_BIND(sym.Info) == elf.STB_GLOBAL {
+				if seenSymbols[sym.Name] {
+					duplicates = append(duplicates, sym.Name)
+				}
+			}
+		}
+		elfFile.Close()
+
+		if len(duplicates) == 0 {
+			// No duplicates, use original
+			dedupedPaths = append(dedupedPaths, objPath)
+			fmt.Printf("  %s: no duplicate symbols\n", filepath.Base(objPath))
+			continue
+		}
+
+		// Create modified copy with duplicates removed
+		fmt.Printf("  %s: removing %d duplicate symbols\n", filepath.Base(objPath), len(duplicates))
+		tempPath := objPath + ".dedup.o"
+		if err := removeSymbolsFromELF(objPath, tempPath, duplicates); err != nil {
+			return nil, fmt.Errorf("failed to remove symbols from %s: %w", objPath, err)
+		}
+
+		dedupedPaths = append(dedupedPaths, tempPath)
+	}
+
+	return dedupedPaths, nil
+}
+
+// removeSymbolsFromELF removes specified global symbols from an ELF object file using objcopy
+func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string) error {
+	// Use objcopy to strip specific symbols
+	args := []string{}
+	for _, symName := range symbolsToRemove {
+		args = append(args, "-N", symName)
+	}
+	args = append(args, inputPath, outputPath)
+
+	cmd := exec.Command("objcopy", args...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("objcopy failed: %w\n%s", err, output)
+	}
+
+	return nil
+}
+
 func linkObjects(objectPaths []string, outputPath string) {
 	fmt.Printf("Linking %d objects into %s...\n", len(objectPaths), outputPath)
+
+	// Deduplicate map symbols before linking
+	dedupedPaths, err := deduplicateMapSymbols(objectPaths)
+	if err != nil {
+		fmt.Printf("Failed to deduplicate map symbols: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Use bpftool to link BPF object files
 	// bpftool gen object <output> <input1.o> <input2.o> ...
 	args := []string{"gen", "object", outputPath}
-	args = append(args, objectPaths...)
+	args = append(args, dedupedPaths...)
 
 	linkCmd := exec.Command("bpftool", args...)
 	linkCmd.Stdout = os.Stdout
@@ -205,6 +320,13 @@ func linkObjects(objectPaths []string, outputPath string) {
 		fmt.Printf("bpftool linking failed: %v\n", err)
 		fmt.Println("Please ensure bpftool is installed and available in PATH")
 		os.Exit(1)
+	}
+
+	// Clean up temporary deduplicated files
+	for _, path := range dedupedPaths {
+		if path != outputPath {
+			os.Remove(path)
+		}
 	}
 
 	fmt.Println("Linking complete.")
