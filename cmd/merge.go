@@ -476,7 +476,14 @@ func linkObjects(objectPaths []string, outputPath string) {
 		irPaths = append(irPaths, outputLL)
 	}
 
-	// Step 2: Link IR files with llvm-link
+	// Step 2: Deduplicate all map globals
+	fmt.Println("  Deduplicating map globals...")
+	if err := deduplicateMapGlobals(irPaths); err != nil {
+		fmt.Printf("Failed to deduplicate: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Step 3: Link IR files with llvm-link
 	mergedLL := outputPath[:len(outputPath)-2] + ".ll" // Replace .o with .ll
 	fmt.Printf("  Linking %d LLVM IR files...\n", len(irPaths))
 
@@ -488,7 +495,6 @@ func linkObjects(objectPaths []string, outputPath string) {
 	llvmLinkCmd.Stderr = os.Stderr
 	if err := llvmLinkCmd.Run(); err != nil {
 		fmt.Printf("llvm-link failed: %v\n", err)
-		fmt.Println("Please ensure llvm-link is installed")
 		os.Exit(1)
 	}
 
@@ -507,6 +513,82 @@ func linkObjects(objectPaths []string, outputPath string) {
 	}
 
 	fmt.Println("LLVM IR merge complete.")
+}
+
+// deduplicateMapGlobals converts duplicate map globals to extern declarations
+func deduplicateMapGlobals(irPaths []string) error {
+	seenMaps := make(map[string]bool)
+
+	for _, irPath := range irPaths {
+		data, err := os.ReadFile(irPath)
+		if err != nil {
+			return err
+		}
+
+		lines := bytes.Split(data, []byte("\n"))
+		modified := false
+
+		for i, line := range lines {
+			// Find map globals: @name = ... global ... section ".maps"
+			if bytes.HasPrefix(bytes.TrimSpace(line), []byte("@")) &&
+				bytes.Contains(line, []byte(" global ")) &&
+				bytes.Contains(line, []byte("section \".maps\"")) {
+
+				// Extract global name
+				parts := bytes.Fields(line)
+				if len(parts) == 0 {
+					continue
+				}
+				mapName := string(parts[0])
+
+				if seenMaps[mapName] {
+					// Convert to extern: @name = external global <type>
+					// From: @hs_programs = dso_local global %struct.anon zeroinitializer, section ".maps", align 8
+					// To:   @hs_programs = external global %struct.anon
+
+					eqIdx := bytes.Index(line, []byte("="))
+					if eqIdx == -1 {
+						continue
+					}
+
+					globalIdx := bytes.Index(line[eqIdx:], []byte(" global "))
+					if globalIdx == -1 {
+						continue
+					}
+					globalIdx += eqIdx + 8 // Skip " global "
+
+					// Find type (ends at space, comma, or opening brace)
+					typeStart := globalIdx
+					typeEnd := typeStart
+					for typeEnd < len(line) {
+						ch := line[typeEnd]
+						if ch == ' ' || ch == ',' || ch == '{' {
+							break
+						}
+						typeEnd++
+					}
+
+					typeName := line[typeStart:typeEnd]
+					newLine := []byte(fmt.Sprintf("%s = external global %s", mapName, typeName))
+
+					lines[i] = newLine
+					modified = true
+					fmt.Printf("    Converted '%s' to extern in %s\n", mapName, filepath.Base(irPath))
+				} else {
+					seenMaps[mapName] = true
+				}
+			}
+		}
+
+		if modified {
+			newData := bytes.Join(lines, []byte("\n"))
+			if err := os.WriteFile(irPath, newData, 0644); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 // mergeAndReplaceTailCalls merges IR files and replaces bpf_tail_call with direct branches
