@@ -313,21 +313,120 @@ func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string
 		return os.WriteFile(outputPath, data, 0644)
 	}
 
-	// DON'T modify symbol bindings - bpftool's linker will handle deduplication
-	// Just copy the file as-is since bpftool doesn't actually need our help
-	// The duplicate symbols will be handled by bpftool gen object during linking
+	// Get symbols
+	symbols, err := elfFile.Symbols()
+	if err != nil {
+		return err
+	}
 
-	// Write unmodified ELF
+	// Find .maps section index
+	var mapsSectionIndex elf.SectionIndex
+	for i, section := range elfFile.Sections {
+		if section.Name == ".maps" {
+			mapsSectionIndex = elf.SectionIndex(i)
+			break
+		}
+	}
+
+	// Modify symbol table entries: change duplicate symbols to STB_LOCAL
+	symtabOffset := symtabSection.Offset
+	symEntrySize := uint64(24) // 64-bit ELF symbol table entry size
+
+	for i, sym := range symbols {
+		for _, symName := range symbolsToRemove {
+			if sym.Name == symName && sym.Section == mapsSectionIndex {
+				// Calculate offset to this symbol entry
+				// NOTE: elfFile.Symbols() skips the NULL symbol at index 0,
+				// so we need to add 1 to get the actual symbol index in the file
+				entryOffset := symtabOffset + uint64(i+1)*symEntrySize
+
+				// Change binding from STB_GLOBAL to STB_LOCAL
+				// Keep section and type unchanged so relocations still work
+				infoOffset := entryOffset + 4
+				currentInfo := data[infoOffset]
+				currentBind := elf.ST_BIND(currentInfo)
+				symType := currentInfo & 0x0F // Keep type (STT_OBJECT for maps)
+				newInfo := byte(elf.STB_LOCAL)<<4 | symType
+				data[infoOffset] = newInfo
+
+				fmt.Printf("    Converted '%s' to local binding (STB_LOCAL)\n", symName)
+				fmt.Printf("      Symbol #%d at offset 0x%x: info byte 0x%02x (bind=%d type=%d) -> 0x%02x (bind=%d type=%d)\n",
+					i+1, infoOffset, currentInfo, currentBind, symType, newInfo, elf.STB_LOCAL, symType)
+			}
+		}
+	}
+
+	// Now we need to fix the symbol table section header's sh_info field
+	// sh_info must contain the index of the first non-local symbol
+	// Since we just converted some global symbols to local, we need to recompute this
+
+	// Re-read symbols to get updated binding info
+	// Actually, we need to manually scan through the modified data
+	// The sh_info should point to the first symbol with STB_GLOBAL binding
+
+	// For simplicity: set sh_info to the total number of symbols
+	// This tells the linker all symbols are local, which is safe but not optimal
+	// Better approach: scan and find first global symbol
+
+	firstGlobalIndex := uint32(len(symbols) + 1) // Default: no global symbols
+
+	for i := range symbols {
+		// Read the info byte from modified data
+		entryOffset := symtabOffset + uint64(i+1)*symEntrySize
+		infoOffset := entryOffset + 4
+		info := data[infoOffset]
+		bind := elf.ST_BIND(info)
+
+		if bind == elf.STB_GLOBAL || bind == elf.STB_WEAK {
+			firstGlobalIndex = uint32(i + 1) // +1 because symbol table includes NULL at index 0
+			break
+		}
+	}
+
+	// Update sh_info in the section header
+	// We need to find the section header offset for .symtab
+	// ELF64 section header: 64 bytes each
+	// sh_info is at offset 44 (4 bytes, little endian)
+
+	// Find the .symtab section header index
+	var symtabSectionIndex int
+	for i, section := range elfFile.Sections {
+		if section.Type == elf.SHT_SYMTAB {
+			symtabSectionIndex = i
+			break
+		}
+	}
+
+	// Section header table offset is in ELF header at offset 40 (8 bytes)
+	shoff := binary.LittleEndian.Uint64(data[40:48])
+
+	// Each section header is 64 bytes in ELF64
+	symtabShdrOffset := shoff + uint64(symtabSectionIndex)*64
+
+	// sh_info is at offset 44 within the section header
+	shInfoOffset := symtabShdrOffset + 44
+
+	fmt.Printf("    Updating .symtab sh_info: first global symbol index = %d\n", firstGlobalIndex)
+	binary.LittleEndian.PutUint32(data[shInfoOffset:shInfoOffset+4], firstGlobalIndex)
+
+	// Write modified ELF
 	return os.WriteFile(outputPath, data, 0644)
 }
 
 func linkObjects(objectPaths []string, outputPath string) {
 	fmt.Printf("Linking %d objects into %s...\n", len(objectPaths), outputPath)
 
+	// Deduplicate map symbols before linking
+	dedupedPaths, err := deduplicateMapSymbols(objectPaths)
+	if err != nil {
+		fmt.Printf("Failed to deduplicate map symbols: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Use bpftool to link BPF object files
 	// bpftool gen object <output> <input1.o> <input2.o> ...
 	args := []string{"gen", "object", outputPath}
-	args = append(args, objectPaths...)
+	args = append(args, dedupedPaths...)
 
 	linkCmd := exec.Command("bpftool", args...)
 	linkCmd.Stdout = os.Stdout
@@ -336,6 +435,13 @@ func linkObjects(objectPaths []string, outputPath string) {
 		fmt.Printf("bpftool linking failed: %v\n", err)
 		fmt.Println("Please ensure bpftool is installed and available in PATH")
 		os.Exit(1)
+	}
+
+	// Clean up temporary deduplicated files
+	for _, path := range dedupedPaths {
+		if path != outputPath {
+			os.Remove(path)
+		}
 	}
 
 	fmt.Println("Linking complete.")
