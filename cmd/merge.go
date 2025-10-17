@@ -482,7 +482,7 @@ func linkObjects(objectPaths []string, outputPath string) {
 
 	progFile := config.GetMainProgram().Name + ".ll"
 
-	linkArgs := []string{"-S", "-o", mergedLL, "--override=" + progFile, "--only-needed", "--internalize"}
+	linkArgs := []string{"-S", "-o", mergedLL, "--override=" + filepath.Join(targetDir, progFile), "--only-needed", "--internalize"}
 	linkArgs = append(linkArgs, irPaths...)
 
 	llvmLinkCmd := exec.Command("llvm-link", linkArgs...)
