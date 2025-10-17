@@ -476,7 +476,7 @@ func linkObjects(objectPaths []string, outputPath string) {
 		irPaths = append(irPaths, outputLL)
 	}
 
-	// Step 2: Link IR files with llvm-link (allows duplicate symbols)
+	// Step 2: Link IR files with llvm-link
 	mergedLL := outputPath[:len(outputPath)-2] + ".ll" // Replace .o with .ll
 	fmt.Printf("  Linking %d LLVM IR files...\n", len(irPaths))
 
