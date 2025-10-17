@@ -281,21 +281,52 @@ func deduplicateMapSymbols(objectPaths []string) ([]string, error) {
 	return dedupedPaths, nil
 }
 
-// removeSymbolsFromELF removes specified global symbols from an ELF object file using objcopy
+// removeSymbolsFromELF removes map definitions by zeroing out their data in .maps section
+// and converting symbols to extern references
 func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string) error {
-	// Use objcopy to strip specific symbols
-	args := []string{}
-	for _, symName := range symbolsToRemove {
-		args = append(args, "-N", symName)
-	}
-	args = append(args, inputPath, outputPath)
-
-	cmd := exec.Command("objcopy", args...)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("objcopy failed: %w\n%s", err, output)
+	// Read the ELF file
+	data, err := os.ReadFile(inputPath)
+	if err != nil {
+		return err
 	}
 
-	return nil
+	elfFile, err := elf.NewFile(bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	defer elfFile.Close()
+
+	// Find .maps section
+	mapsSection := elfFile.Section(".maps")
+	if mapsSection == nil {
+		// No maps section, just copy
+		return os.WriteFile(outputPath, data, 0644)
+	}
+
+	// Get symbols
+	symbols, err := elfFile.Symbols()
+	if err != nil {
+		return err
+	}
+
+	// Find the offset and size of each duplicate map in .maps section
+	for _, sym := range symbols {
+		for _, symName := range symbolsToRemove {
+			if sym.Name == symName && sym.Section == elf.SectionIndex(mapsSection.SectionIndex) {
+				// Zero out this map's data in .maps section
+				mapOffset := mapsSection.Offset + sym.Value
+				mapSize := sym.Size
+
+				for i := uint64(0); i < mapSize; i++ {
+					data[mapOffset+i] = 0
+				}
+				fmt.Printf("    Zeroed map '%s' at offset %d, size %d\n", symName, mapOffset, mapSize)
+			}
+		}
+	}
+
+	// Write modified ELF
+	return os.WriteFile(outputPath, data, 0644)
 }
 
 func linkObjects(objectPaths []string, outputPath string) {
