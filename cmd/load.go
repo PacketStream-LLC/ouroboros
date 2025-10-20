@@ -88,7 +88,7 @@ var loadCmd = &cobra.Command{
 			pinPath := filepath.Join(config.GetBpfBaseDir(), progName)
 
 			// check if pinPath exists
-			if _, err := os.Stat(pinPath); !os.IsNotExist(err) {
+			if _, err := os.Stat(pinPath); err == nil {
 				prePinnedProgram, err := ebpf.LoadPinnedProgram(pinPath, &ebpf.LoadPinOptions{})
 				if err == nil {
 					if err := prePinnedProgram.Unpin(); err != nil {
