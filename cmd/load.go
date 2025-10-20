@@ -85,7 +85,7 @@ var loadCmd = &cobra.Command{
 				}
 			}
 
-			pinPath := filepath.Join(config.GetBpfBaseDir(), progName)
+			pinPath := filepath.Join(config.GetBpfBaseDir(), config.ProgramPrefix+progName)
 
 			// check if pinPath exists
 			if _, err := os.Stat(pinPath); err == nil {
