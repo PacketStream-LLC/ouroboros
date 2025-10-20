@@ -16,10 +16,12 @@ import (
 
 var mergeCmd = &cobra.Command{
 	Use:   "merge [src] [target]",
-	Short: "Merge eBPF tail call targets into a single object file, replacing tail calls with direct jumps",
-	Long: `Merge eBPF programs:
+	Short: "[EXPERIMENTAL] Merge eBPF tail call targets into a single object file, replacing tail calls with direct jumps",
+	Long: `[EXPERIMENTAL] Merge eBPF programs:
   ouroboros merge              - Merge all programs into the main program (defined in config)
-  ouroboros merge [src] [target] - Merge target program into src program`,
+  ouroboros merge [src] [target] - Merge target program into src program
+
+WARNING: This feature is experimental and may not work correctly in all cases.`,
 	Args: cobra.RangeArgs(0, 2),
 	Run: func(cmd *cobra.Command, args []string) {
 		if _, err := os.Stat("/usr/include/bpf/bpf.h"); os.IsNotExist(err) {

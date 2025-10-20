@@ -134,7 +134,7 @@ You can specify the map by name or kernel ID.`,
 		// Discover maps from all programs
 		for _, prog := range config.Programs {
 			progName := prog.Name
-			objFile := filepath.Join("target", fmt.Sprintf("%s.o", progName))
+			objFile := filepath.Join("target", fmt.Sprintf("%s%s.o", config.ProgramPrefix, progName))
 
 			if _, err := os.Stat(objFile); os.IsNotExist(err) {
 				continue
@@ -359,10 +359,152 @@ func mapTypeToString(mapType ebpf.MapType) string {
 	}
 }
 
+var mapFlowCmd = &cobra.Command{
+	Use:   "flow [map-name]",
+	Short: "Generate Mermaid diagram showing program dependencies for maps",
+	Long: `Generate a Mermaid flowchart diagram showing which programs use which maps.
+If a map name is specified, shows only that map's program dependencies.
+Otherwise, shows all maps and their program dependencies.`,
+	Args: cobra.MaximumNArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		config, err := ReadConfig()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
+		// Check if target directory exists
+		if _, err := os.Stat("target"); os.IsNotExist(err) {
+			fmt.Println("Error: target directory not found. Run 'ouroboros build' first.")
+			os.Exit(1)
+		}
+
+		outputFile, _ := cmd.Flags().GetString("output")
+		if outputFile == "" {
+			outputFile = "map.mermaid"
+		}
+
+		// Discover all maps and their programs
+		allMaps := make(map[string]*MapInfo)
+
+		for _, prog := range config.Programs {
+			progName := prog.Name
+			objFile := filepath.Join("target", fmt.Sprintf("%s.o", progName))
+
+			if _, err := os.Stat(objFile); os.IsNotExist(err) {
+				continue
+			}
+
+			collSpec, err := ebpf.LoadCollectionSpec(objFile)
+			if err != nil {
+				continue
+			}
+
+			// Extract maps from this program
+			for mapName, mapSpec := range collSpec.Maps {
+				if existing, ok := allMaps[mapName]; ok {
+					existing.Programs = append(existing.Programs, progName)
+				} else {
+					allMaps[mapName] = &MapInfo{
+						Name:       mapName,
+						Type:       mapSpec.Type,
+						KeySize:    mapSpec.KeySize,
+						ValueSize:  mapSpec.ValueSize,
+						MaxEntries: mapSpec.MaxEntries,
+						Programs:   []string{progName},
+					}
+				}
+			}
+		}
+
+		if len(allMaps) == 0 {
+			fmt.Println("No maps found in compiled programs.")
+			os.Exit(1)
+		}
+
+		// Filter to specific map if requested
+		var targetMaps map[string]*MapInfo
+		if len(args) > 0 {
+			mapName := args[0]
+			if info, ok := allMaps[mapName]; ok {
+				targetMaps = map[string]*MapInfo{mapName: info}
+			} else {
+				fmt.Printf("Error: map '%s' not found\n", mapName)
+				os.Exit(1)
+			}
+		} else {
+			targetMaps = allMaps
+		}
+
+		// Generate Mermaid diagram
+		mermaid := generateMapFlowMermaid(targetMaps)
+
+		// Write to file
+		if err := os.WriteFile(outputFile, []byte(mermaid), 0644); err != nil {
+			fmt.Printf("Error: failed to write to %s: %v\n", outputFile, err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Generated map dependency diagram: %s\n", outputFile)
+	},
+}
+
+func generateMapFlowMermaid(maps map[string]*MapInfo) string {
+	var sb strings.Builder
+
+	sb.WriteString("graph TD\n")
+	sb.WriteString("  %% Map Dependencies\n\n")
+
+	// Sort map names for consistent output
+	mapNames := make([]string, 0, len(maps))
+	for name := range maps {
+		mapNames = append(mapNames, name)
+	}
+	sort.Strings(mapNames)
+
+	// Generate nodes and edges
+	for _, mapName := range mapNames {
+		mapInfo := maps[mapName]
+
+		// Create map node with type info
+		mapNodeID := fmt.Sprintf("map_%s", sanitizeMermaidID(mapName))
+		sb.WriteString(fmt.Sprintf("  %s[\"%s\\n(%s)\"]\n",
+			mapNodeID,
+			mapName,
+			mapTypeToString(mapInfo.Type)))
+
+		// Style map node
+		sb.WriteString(fmt.Sprintf("  style %s fill:#f9f,stroke:#333,stroke-width:2px\n", mapNodeID))
+
+		// Create edges from programs to map
+		for _, progName := range mapInfo.Programs {
+			progNodeID := fmt.Sprintf("prog_%s", sanitizeMermaidID(progName))
+			sb.WriteString(fmt.Sprintf("  %s[\"%s\"] --> %s\n",
+				progNodeID,
+				progName,
+				mapNodeID))
+		}
+
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+func sanitizeMermaidID(s string) string {
+	// Replace characters that are problematic in Mermaid IDs
+	s = strings.ReplaceAll(s, "-", "_")
+	s = strings.ReplaceAll(s, ".", "_")
+	s = strings.ReplaceAll(s, " ", "_")
+	return s
+}
+
 func init() {
 	RootCmd.AddCommand(mapCmd)
 	mapCmd.AddCommand(mapListCmd)
 	mapCmd.AddCommand(mapShowCmd)
+	mapCmd.AddCommand(mapFlowCmd)
 
 	mapListCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show program information (like bpftool pids)")
+	mapFlowCmd.Flags().StringP("output", "o", "", "Output file path (default: map.mermaid)")
 }
