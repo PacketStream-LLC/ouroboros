@@ -468,7 +468,7 @@ func generateMapFlowMermaid(maps map[string]*MapInfo) string {
 
 		// Create map node with type info
 		mapNodeID := fmt.Sprintf("map_%s", sanitizeMermaidID(mapName))
-		sb.WriteString(fmt.Sprintf("  %s[\"%s\\n(%s)\"]\n",
+		sb.WriteString(fmt.Sprintf("  %s[\"%s\n(%s)\"]\n",
 			mapNodeID,
 			mapName,
 			mapTypeToString(mapInfo.Type)))
