@@ -50,7 +50,7 @@ func (c *OuroborosConfig) GetProgramMap() string {
 }
 
 func (c *OuroborosConfig) GetBpfBaseDir() string {
-	if c.BpfBaseDir != "" {
+	if c.BpfBaseDir == "" {
 		return "/sys/fs/bpf"
 	}
 
