@@ -98,10 +98,12 @@ var loadCmd = &cobra.Command{
 				}
 
 				// first delete
-				err = os.Remove(pinPath)
-				if err != nil {
-					fmt.Println("Failed to cleanup existing pinPath:", err)
-					os.Exit(1)
+				if _, err := os.Stat(pinPath); err == nil {
+					err = os.Remove(pinPath)
+					if err != nil {
+						fmt.Println("Failed to cleanup existing pinPath:", err)
+						os.Exit(1)
+					}
 				}
 			}
 
