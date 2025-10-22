@@ -85,10 +85,10 @@ var loadCmd = &cobra.Command{
 				}
 			}
 
-			pinPath := filepath.Join(config.GetBpfBaseDir(), progName)
+			pinPath := filepath.Join(config.GetBpfBaseDir(), config.ProgramPrefix+progName)
 
 			// check if pinPath exists
-			if _, err := os.Stat(pinPath); !os.IsNotExist(err) {
+			if _, err := os.Stat(pinPath); err == nil {
 				prePinnedProgram, err := ebpf.LoadPinnedProgram(pinPath, &ebpf.LoadPinOptions{})
 				if err == nil {
 					if err := prePinnedProgram.Unpin(); err != nil {
@@ -98,10 +98,12 @@ var loadCmd = &cobra.Command{
 				}
 
 				// first delete
-				err = os.Remove(pinPath)
-				if err != nil {
-					fmt.Println("Failed to cleanup existing pinPath:", err)
-					os.Exit(1)
+				if _, err := os.Stat(pinPath); err == nil {
+					err = os.Remove(pinPath)
+					if err != nil {
+						fmt.Println("Failed to cleanup existing pinPath:", err)
+						os.Exit(1)
+					}
 				}
 			}
 
