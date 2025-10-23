@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -549,11 +550,137 @@ func sanitizeMermaidID(s string) string {
 	return s
 }
 
+// resolveMapPath resolves a map name to its pinned path
+func resolveMapPath(mapName string) (string, error) {
+	config, err := ReadConfig()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(config.GetBpfBaseDir(), mapName), nil
+}
+
+// createPassthroughCmd creates a pass-through command for a specific bpftool subcommand
+func createPassthroughCmd(subcommand string) *cobra.Command {
+	return &cobra.Command{
+		Use:                subcommand + " MAP_NAME [args...]",
+		Short:              fmt.Sprintf("%s map (pass-through to bpftool)", strings.Title(subcommand)),
+		Long:               fmt.Sprintf(`Executes 'bpftool map %s' with automatic map name resolution to pinned paths.`, subcommand),
+		DisableFlagParsing: true,
+		Run: func(cmd *cobra.Command, args []string) {
+			// Check if we have arguments
+			if len(args) == 0 {
+				fmt.Printf("Usage: ouroboros map %s MAP_NAME [args...]\n", subcommand)
+				fmt.Printf("Pass-through to: bpftool map %s\n", subcommand)
+				os.Exit(1)
+			}
+
+			// Build bpftool command arguments
+			bpftoolArgs := []string{"map", subcommand}
+
+			// Check if the first argument is a map name (not a flag or id/pinned keyword)
+			mapNameOrID := args[0]
+			restArgs := args[1:]
+
+			// If it looks like a map name (not starting with - and not numeric ID), resolve it
+			if !strings.HasPrefix(mapNameOrID, "-") && !strings.HasPrefix(mapNameOrID, "id") && !strings.HasPrefix(mapNameOrID, "pinned") {
+				// Try to resolve as map name
+				pinPath, err := resolveMapPath(mapNameOrID)
+				if err != nil {
+					fmt.Printf("Error: failed to resolve map path: %v\n", err)
+					os.Exit(1)
+				}
+
+				// Check if the pinned map exists
+				if _, err := os.Stat(pinPath); err == nil {
+					// Map exists, use pinned path
+					bpftoolArgs = append(bpftoolArgs, "pinned", pinPath)
+				} else {
+					// Map doesn't exist, might be an ID or other identifier, pass through as-is
+					bpftoolArgs = append(bpftoolArgs, mapNameOrID)
+				}
+			} else {
+				// Pass through as-is (already has id/pinned prefix or is a flag)
+				bpftoolArgs = append(bpftoolArgs, mapNameOrID)
+			}
+
+			// Append remaining arguments
+			bpftoolArgs = append(bpftoolArgs, restArgs...)
+
+			// Execute bpftool
+			bpftoolPath, err := findBpftool()
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				os.Exit(1)
+			}
+
+			// Use os/exec to run bpftool
+			execBpftool(bpftoolPath, bpftoolArgs)
+		},
+	}
+}
+
+// findBpftool locates the bpftool binary
+func findBpftool() (string, error) {
+	// Check common locations
+	locations := []string{
+		"/usr/sbin/bpftool",
+		"/usr/local/sbin/bpftool",
+		"/sbin/bpftool",
+	}
+
+	for _, loc := range locations {
+		if _, err := os.Stat(loc); err == nil {
+			return loc, nil
+		}
+	}
+
+	// Try to find in PATH
+	path, err := exec.LookPath("bpftool")
+	if err != nil {
+		return "", fmt.Errorf("bpftool not found in standard locations or PATH")
+	}
+
+	return path, nil
+}
+
+// execBpftool executes bpftool with the given arguments
+func execBpftool(bpftoolPath string, args []string) {
+	cmd := exec.Command(bpftoolPath, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		fmt.Printf("Error executing bpftool: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 func init() {
 	RootCmd.AddCommand(mapCmd)
 	mapCmd.AddCommand(mapListCmd)
 	mapCmd.AddCommand(mapShowCmd)
 	mapCmd.AddCommand(mapFlowCmd)
+
+	// Add pass-through commands for bpftool operations
+	mapCmd.AddCommand(
+		createPassthroughCmd("dump"),
+		createPassthroughCmd("update"),
+		createPassthroughCmd("lookup"),
+		createPassthroughCmd("getnext"),
+		createPassthroughCmd("delete"),
+		createPassthroughCmd("pin"),
+		createPassthroughCmd("event_pipe"),
+		createPassthroughCmd("peek"),
+		createPassthroughCmd("push"),
+		createPassthroughCmd("pop"),
+		createPassthroughCmd("enqueue"),
+		createPassthroughCmd("dequeue"),
+		createPassthroughCmd("freeze"),
+	)
 
 	mapListCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show program information (like bpftool pids)")
 	mapFlowCmd.Flags().StringP("output", "o", "", "Output file path (default: map.mermaid)")
