@@ -16,6 +16,7 @@ import (
 )
 
 var verbose bool
+var mapTypeFilter string
 
 var mapCmd = &cobra.Command{
 	Use:   "map",
@@ -102,16 +103,47 @@ Matches bpftool map list output format.`,
 			}
 		}
 
+		// Filter by type if specified
+		var filteredMaps map[string]*MapInfo
+		if mapTypeFilter != "" {
+			filterType := parseMapType(mapTypeFilter)
+			if filterType == ebpf.UnspecifiedMap {
+				fmt.Printf("Error: unknown map type '%s'\n", mapTypeFilter)
+				fmt.Println("Valid types: hash, array, prog_array, perf_event_array, percpu_hash,")
+				fmt.Println("             percpu_array, stack_trace, cgroup_array, lru_hash,")
+				fmt.Println("             lru_percpu_hash, lpm_trie, array_of_maps, hash_of_maps,")
+				fmt.Println("             devmap, sockmap, cpumap, xskmap, ringbuf, etc.")
+				os.Exit(1)
+			}
+			filteredMaps = make(map[string]*MapInfo)
+			for name, info := range allMaps {
+				if info.Type == filterType {
+					filteredMaps[name] = info
+				}
+			}
+		} else {
+			filteredMaps = allMaps
+		}
+
+		if len(filteredMaps) == 0 {
+			if mapTypeFilter != "" {
+				fmt.Printf("No maps of type '%s' found.\n", mapTypeFilter)
+			} else {
+				fmt.Println("No maps found in compiled programs.")
+			}
+			return
+		}
+
 		// Sort maps by name for consistent output
-		mapNames := make([]string, 0, len(allMaps))
-		for name := range allMaps {
+		mapNames := make([]string, 0, len(filteredMaps))
+		for name := range filteredMaps {
 			mapNames = append(mapNames, name)
 		}
 		sort.Strings(mapNames)
 
 		// Print map information in bpftool style
 		for _, name := range mapNames {
-			mapInfo := allMaps[name]
+			mapInfo := filteredMaps[name]
 			printMapInfoBpftool(mapInfo, verbose)
 		}
 	},
@@ -410,6 +442,58 @@ func mapTypeToString(mapType ebpf.MapType) string {
 		return "struct_ops"
 	default:
 		return fmt.Sprintf("type_%d", mapType)
+	}
+}
+
+func parseMapType(typeStr string) ebpf.MapType {
+	typeStr = strings.ToLower(typeStr)
+	switch typeStr {
+	case "hash":
+		return ebpf.Hash
+	case "array":
+		return ebpf.Array
+	case "prog_array", "program_array":
+		return ebpf.ProgramArray
+	case "perf_event_array":
+		return ebpf.PerfEventArray
+	case "percpu_hash":
+		return ebpf.PerCPUHash
+	case "percpu_array":
+		return ebpf.PerCPUArray
+	case "stack_trace":
+		return ebpf.StackTrace
+	case "cgroup_array":
+		return ebpf.CGroupArray
+	case "lru_hash":
+		return ebpf.LRUHash
+	case "lru_percpu_hash":
+		return ebpf.LRUCPUHash
+	case "lpm_trie":
+		return ebpf.LPMTrie
+	case "array_of_maps":
+		return ebpf.ArrayOfMaps
+	case "hash_of_maps":
+		return ebpf.HashOfMaps
+	case "devmap", "devmap_hash":
+		return ebpf.DevMap
+	case "sockmap":
+		return ebpf.SockMap
+	case "cpumap":
+		return ebpf.CPUMap
+	case "xskmap":
+		return ebpf.XSKMap
+	case "ringbuf":
+		return ebpf.RingBuf
+	case "inode_storage":
+		return ebpf.InodeStorage
+	case "task_storage":
+		return ebpf.TaskStorage
+	case "cgroup_storage":
+		return ebpf.CGroupStorage
+	case "struct_ops":
+		return ebpf.StructOpsMap
+	default:
+		return ebpf.UnspecifiedMap
 	}
 }
 
@@ -767,5 +851,6 @@ func init() {
 	)
 
 	mapListCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show program information (like bpftool pids)")
+	mapListCmd.Flags().StringVarP(&mapTypeFilter, "type", "t", "", "Filter maps by type (e.g., hash, array, ringbuf)")
 	mapFlowCmd.Flags().StringP("output", "o", "", "Output file path (default: map.mermaid)")
 }
