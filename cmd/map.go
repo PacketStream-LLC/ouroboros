@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/ringbuf"
 	"github.com/spf13/cobra"
 )
 
@@ -550,6 +553,86 @@ func sanitizeMermaidID(s string) string {
 	return s
 }
 
+var mapLogCmd = &cobra.Command{
+	Use:   "log MAP_NAME",
+	Short: "Read and print ringbuf events from a map",
+	Long: `Continuously reads events from a ringbuf map and prints them to stdout.
+The map must be of type ringbuf, otherwise the command will fail.
+Press Ctrl-C to stop reading events.`,
+	Args: cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		mapName := args[0]
+
+		config, err := ReadConfig()
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Resolve map path
+		pinPath := filepath.Join(config.GetBpfBaseDir(), mapName)
+
+		// Check if map exists
+		if _, err := os.Stat(pinPath); err != nil {
+			fmt.Printf("Error: map '%s' not found at %s\n", mapName, pinPath)
+			os.Exit(1)
+		}
+
+		// Load the pinned map
+		m, err := ebpf.LoadPinnedMap(pinPath, nil)
+		if err != nil {
+			fmt.Printf("Error: failed to load map '%s': %v\n", mapName, err)
+			os.Exit(1)
+		}
+		defer m.Close()
+
+		// Verify it's a ringbuf map
+		info, err := m.Info()
+		if err != nil {
+			fmt.Printf("Error: failed to get map info: %v\n", err)
+			os.Exit(1)
+		}
+
+		if info.Type != ebpf.RingBuf {
+			fmt.Printf("Error: map '%s' is not a ringbuf (type: %s)\n", mapName, info.Type)
+			os.Exit(1)
+		}
+
+		// Create ringbuf reader
+		rd, err := ringbuf.NewReader(m)
+		if err != nil {
+			fmt.Printf("Error: failed to create ringbuf reader: %v\n", err)
+			os.Exit(1)
+		}
+		defer rd.Close()
+
+		// Setup signal handling for graceful shutdown
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+
+		// Read events in a goroutine
+		go func() {
+			for {
+				record, err := rd.Read()
+				if err != nil {
+					if err == ringbuf.ErrClosed {
+						return
+					}
+					fmt.Printf("Error reading from ringbuf: %v\n", err)
+					continue
+				}
+
+				// Print the raw data directly to stdout
+				os.Stdout.Write(record.RawSample)
+			}
+		}()
+
+		// Wait for interrupt signal
+		<-sig
+		fmt.Println("\nStopping...")
+	},
+}
+
 // resolveMapPath resolves a map name to its pinned path
 func resolveMapPath(mapName string) (string, error) {
 	config, err := ReadConfig()
@@ -664,6 +747,7 @@ func init() {
 	mapCmd.AddCommand(mapListCmd)
 	mapCmd.AddCommand(mapShowCmd)
 	mapCmd.AddCommand(mapFlowCmd)
+	mapCmd.AddCommand(mapLogCmd)
 
 	// Add pass-through commands for bpftool operations
 	mapCmd.AddCommand(
