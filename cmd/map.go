@@ -88,9 +88,12 @@ Matches bpftool map list output format.`,
 		for name, mapInfo := range allMaps {
 			pinPath := filepath.Join(config.GetBpfBaseDir(), name)
 			if m, err := ebpf.LoadPinnedMap(pinPath, nil); err == nil {
-				mapID := m.FD()
-				mapInfo.ID = uint32(mapID)
-				mapInfo.Pinned = true
+				info, err := m.Info()
+				if err == nil {
+					id, _ := info.ID()
+					mapInfo.ID = uint32(id)
+					mapInfo.Pinned = true
+				}
 				m.Close()
 			}
 		}
@@ -231,43 +234,36 @@ type MapInfo struct {
 }
 
 func printMapInfoBpftool(info *MapInfo, verbose bool) {
-	// Format: <id>: <type> name <name> flags 0x0 key <size>B value <size>B max_entries <count>
-	// If not pinned/loaded, just show the spec without ID
+	// Format matching bpftool map list output:
+	// Line 1: <id>: <type>  name <name>  flags 0x0
+	// Line 2:     key <size>B  value <size>B  max_entries <count>  memlock <size>B
 
+	// First line: ID, type, name, flags
 	if info.Pinned && info.ID > 0 {
 		// Map is loaded in kernel, show with ID
-		fmt.Printf("%d: %s  name %s  flags 0x0",
+		fmt.Printf("%d: %s  name %s  flags 0x0\n",
 			info.ID,
 			mapTypeToLowerString(info.Type),
 			info.Name)
 	} else {
 		// Map not loaded, show without ID
-		fmt.Printf("%s  name %s  flags 0x0",
+		fmt.Printf("%s  name %s  flags 0x0\n",
 			mapTypeToLowerString(info.Type),
 			info.Name)
 	}
 
-	// Key and value sizes
-	fmt.Printf("  key %dB  value %dB  max_entries %d",
+	// Second line: key, value, max_entries, memlock (with 4-space indentation)
+	memlock := calculateMemlock(info)
+	fmt.Printf("    key %dB  value %dB  max_entries %d  memlock %dB\n",
 		info.KeySize,
 		info.ValueSize,
-		info.MaxEntries)
+		info.MaxEntries,
+		memlock)
 
-	// Show program information if verbose
-	if verbose {
-		if len(info.Programs) == 1 {
-			fmt.Printf("  pids %s", info.Programs[0])
-		} else if len(info.Programs) > 1 {
-			fmt.Printf("  pids %s", strings.Join(info.Programs, ","))
-		}
+	// Additional lines for program info if verbose
+	if verbose && len(info.Programs) > 0 {
+		fmt.Printf("    pids %s\n", strings.Join(info.Programs, ","))
 	}
-
-	// Show if it's a potential shared map
-	if len(info.Programs) > 1 || strings.HasPrefix(info.Name, "shared_") {
-		fmt.Printf("  # shared")
-	}
-
-	fmt.Println()
 }
 
 func printMapInfoDetailed(config *OuroborosConfig, info *MapInfo) {
@@ -301,6 +297,60 @@ func printMapInfoDetailed(config *OuroborosConfig, info *MapInfo) {
 	}
 
 	fmt.Println()
+}
+
+func calculateMemlock(info *MapInfo) uint64 {
+	// Estimate memlock size based on map type and parameters
+	// This is an approximation of kernel memory locked for the map
+
+	var memlock uint64
+
+	// Base overhead per map entry (includes internal kernel structures)
+	const entryOverhead = 64
+
+	// Calculate based on map type
+	switch info.Type {
+	case ebpf.RingBuf:
+		// Ringbuf uses max_entries as total buffer size
+		memlock = uint64(info.MaxEntries)
+		// Add page alignment overhead (round up to page size)
+		pageSize := uint64(4096)
+		memlock = ((memlock + pageSize - 1) / pageSize) * pageSize
+		// Add additional overhead for ringbuf metadata
+		memlock += 8192
+
+	case ebpf.PerfEventArray:
+		// Perf arrays have per-CPU buffers
+		memlock = uint64(info.MaxEntries) * uint64(info.ValueSize)
+		memlock += entryOverhead * uint64(info.MaxEntries)
+
+	case ebpf.Array, ebpf.PerCPUArray:
+		// Arrays pre-allocate all entries
+		entrySize := uint64(info.KeySize) + uint64(info.ValueSize) + entryOverhead
+		memlock = entrySize * uint64(info.MaxEntries)
+
+	case ebpf.Hash, ebpf.PerCPUHash, ebpf.LRUHash, ebpf.LRUCPUHash:
+		// Hash maps have variable occupancy, estimate at full capacity
+		entrySize := uint64(info.KeySize) + uint64(info.ValueSize) + entryOverhead
+		memlock = entrySize * uint64(info.MaxEntries)
+		// Add hash table overhead (bucket array)
+		memlock += uint64(info.MaxEntries) * 8
+
+	case ebpf.ProgramArray, ebpf.ArrayOfMaps, ebpf.HashOfMaps:
+		// Map-in-map and prog arrays store references
+		entrySize := uint64(info.KeySize) + 8 + entryOverhead // 8 bytes for fd/reference
+		memlock = entrySize * uint64(info.MaxEntries)
+
+	default:
+		// Default calculation for other map types
+		entrySize := uint64(info.KeySize) + uint64(info.ValueSize) + entryOverhead
+		memlock = entrySize * uint64(info.MaxEntries)
+	}
+
+	// Add base map structure overhead
+	memlock += 512
+
+	return memlock
 }
 
 func mapTypeToLowerString(mapType ebpf.MapType) string {
