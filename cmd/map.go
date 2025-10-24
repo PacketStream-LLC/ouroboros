@@ -694,26 +694,41 @@ Press Ctrl-C to stop reading events.`,
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 
+		// Channel to signal the reader goroutine to stop
+		done := make(chan struct{})
+
 		// Read events in a goroutine
 		go func() {
 			for {
-				record, err := rd.Read()
-				if err != nil {
-					if err == ringbuf.ErrClosed {
-						return
+				select {
+				case <-done:
+					return
+				default:
+					record, err := rd.Read()
+					if err != nil {
+						if err == ringbuf.ErrClosed {
+							return
+						}
+						// Only print error if we're not shutting down
+						select {
+						case <-done:
+							return
+						default:
+							fmt.Fprintf(os.Stderr, "Error reading from ringbuf: %v\n", err)
+						}
+						continue
 					}
-					fmt.Printf("Error reading from ringbuf: %v\n", err)
-					continue
-				}
 
-				// Print the raw data directly to stdout
-				os.Stdout.Write(record.RawSample)
+					// Print the raw data directly to stdout
+					os.Stdout.Write(record.RawSample)
+				}
 			}
 		}()
 
 		// Wait for interrupt signal
 		<-sig
-		fmt.Println("\nStopping...")
+		fmt.Fprintln(os.Stderr, "\nStopping...")
+		close(done)
 	},
 }
 
