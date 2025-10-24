@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 
 	"github.com/cilium/ebpf"
@@ -35,14 +36,15 @@ var attachCmd = &cobra.Command{
 			return
 		}
 
-		pinPath := filepath.Join(ouroborosConfig.GetBpfBaseDir(), ouroborosConfig.ProgramPrefix+program.Name)
-		prog, err := ebpf.LoadPinnedProgram(pinPath, nil)
+		progPinPath := filepath.Join(ouroborosConfig.GetBpfBaseDir(), ouroborosConfig.ProgramPrefix+program.Name)
+		prog, err := ebpf.LoadPinnedProgram(progPinPath, nil)
 		if err != nil {
-			fmt.Printf("failed to load pinned program %s: %s\n", pinPath, err)
+			fmt.Printf("failed to load pinned program %s: %s\n", progPinPath, err)
 			return
 		}
+		defer prog.Close()
 
-		// Attach the program.
+		// Attach the program to the interface
 		l, err := link.AttachXDP(link.XDPOptions{
 			Program:   prog,
 			Interface: iface.Index,
@@ -51,9 +53,21 @@ var attachCmd = &cobra.Command{
 			fmt.Printf("failed to attach program to interface %s: %s\n", ifaceName, err)
 			return
 		}
-		defer l.Close()
+
+		// Pin the link to persist the attachment
+		linkPinPath := filepath.Join(ouroborosConfig.GetBpfBaseDir(), fmt.Sprintf("link_%s_%s", program.Name, ifaceName))
+
+		// Remove existing link pin if it exists
+		os.Remove(linkPinPath)
+
+		if err := l.Pin(linkPinPath); err != nil {
+			l.Close()
+			fmt.Printf("failed to pin link to %s: %s\n", linkPinPath, err)
+			return
+		}
 
 		fmt.Printf("Successfully attached program to interface %s\n", ifaceName)
+		fmt.Printf("Link pinned at: %s\n", linkPinPath)
 	},
 }
 

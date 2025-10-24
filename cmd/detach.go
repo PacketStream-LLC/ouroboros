@@ -3,6 +3,8 @@ package cmd
 import (
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/vishvananda/netlink"
@@ -30,6 +32,20 @@ var detachCmd = &cobra.Command{
 		if err := netlink.LinkSetXdpFd(link, -1); err != nil {
 			fmt.Printf("failed to detach program from interface %s: %s\n", ifaceName, err)
 			return
+		}
+
+		// Clean up pinned link file if it exists
+		ouroborosConfig, err := ReadConfig()
+		if err == nil {
+			program := ouroborosConfig.GetMainProgram()
+			if program != nil {
+				linkPinPath := filepath.Join(ouroborosConfig.GetBpfBaseDir(), fmt.Sprintf("link_%s_%s", program.Name, ifaceName))
+				if _, err := os.Stat(linkPinPath); err == nil {
+					if err := os.Remove(linkPinPath); err != nil {
+						fmt.Printf("warning: failed to remove pinned link at %s: %s\n", linkPinPath, err)
+					}
+				}
+			}
 		}
 
 		fmt.Printf("Successfully detached program from interface %s\n", ifaceName)
