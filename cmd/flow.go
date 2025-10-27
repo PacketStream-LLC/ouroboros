@@ -16,23 +16,22 @@ var flowCmd = &cobra.Command{
 	Short: "Analyze the tail call flow of eBPF programs and generate a Mermaid flowchart",
 	Args:  cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+
 		if _, err := os.Stat("/usr/include/bpf/bpf.h"); os.IsNotExist(err) {
-			fmt.Println("libbpf-dev is not installed. Please install it first.")
-			os.Exit(1)
+			Fatal("libbpf-dev is not installed. Please install it first")
 		}
 
 		ouroborosConfig, err := ReadConfig()
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			Fatal("Failed to read config", "error", err)
 		}
 
 		mainProg := ouroborosConfig.GetMainProgram()
 		if mainProg == nil {
-			fmt.Println("Main program not found in ouroboros.json. Please set 'is_main' to true for one of the programs.")
-			os.Exit(1)
+			Fatal("Main program not found in ouroboros.json. Please set 'is_main' to true for one of the programs")
 		}
 
+		Debug("Building programs before flow analysis")
 		buildCmd.Run(cmd, []string{})
 
 		outputFile := "flow.mermaid"
@@ -40,19 +39,20 @@ var flowCmd = &cobra.Command{
 			outputFile = args[0]
 		}
 
+		Debug("Creating output file", "path", outputFile)
+
 		f, err := os.Create(outputFile)
 		if err != nil {
-			fmt.Printf("Failed to create output file: %v\n", err)
-			os.Exit(1)
+			Fatal("Failed to create output file", "path", outputFile, "error", err)
 		}
 		defer f.Close()
 
-		fmt.Println("Analyzing flow...")
+		Info("Analyzing flow")
 		var flowchart strings.Builder
 		flowchart.WriteString("graph TD\n")
 		analyzeProgram(nil, mainProg, ouroborosConfig, make(map[string]bool), &flowchart)
 		fmt.Fprint(f, flowchart.String())
-		fmt.Printf("Flowchart generated at %s\n", outputFile)
+		Info("Flowchart generated", "output", outputFile)
 	},
 }
 
@@ -74,8 +74,7 @@ func analyzeProgram(from *Program, prog *Program, config *OuroborosConfig, visit
 
 	progSpec, err := ebpf.LoadCollectionSpec(filepath.Join("target", fmt.Sprintf("%s.o", prog.Name)))
 	if err != nil {
-		fmt.Printf("Failed to load program object %s: %v\n", prog.Name, err)
-		os.Exit(1)
+		Fatal("Failed to load program object", "program", prog.Name, "error", err)
 	}
 
 	var nextProgs []*Program
@@ -100,6 +99,3 @@ func analyzeProgram(from *Program, prog *Program, config *OuroborosConfig, visit
 	}
 }
 
-func init() {
-	RootCmd.AddCommand(flowCmd)
-}

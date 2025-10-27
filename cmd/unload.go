@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -12,34 +11,61 @@ var unloadCmd = &cobra.Command{
 	Use:   "unload",
 	Short: "Unload the compiled eBPF programs from the kernel and unpin maps",
 	Run: func(cmd *cobra.Command, args []string) {
+
 		config, err := ReadConfig()
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			Fatal("Failed to read config", "error", err)
 		}
 
+		Debug("Unloading eBPF programs",
+			"bpf_base_dir", config.GetBpfBaseDir(),
+			"program_prefix", config.ProgramPrefix,
+			"total_programs", len(config.Programs))
+
 		// Unpin programs
-		for _, prog := range config.Programs {
+		successCount := 0
+		failCount := 0
+		for i, prog := range config.Programs {
 			progPath := filepath.Join(config.GetBpfBaseDir(), config.ProgramPrefix+prog.Name)
+
+			Debug("Unpinning program",
+				"index", i+1,
+				"total", len(config.Programs),
+				"name", prog.Name,
+				"path", progPath)
+
 			if err := os.Remove(progPath); err != nil {
-				fmt.Printf("failed to unpin program %s: %v\n", prog.Name, err)
+				Warn("Failed to unpin program",
+					"program", prog.Name,
+					"error", err)
+				failCount++
 				// Don't exit, try to unpin other programs
+			} else {
+				Info("Unpinned program", "name", prog.Name)
+				successCount++
 			}
-			fmt.Printf("Unpinned program %s\n", prog.Name)
 		}
+
+		Debug("Program unload summary",
+			"success", successCount,
+			"failed", failCount)
 
 		// Unpin program array map
 		progMapPath := filepath.Join(config.GetBpfBaseDir(), config.GetProgramMap())
-		if err := os.Remove(progMapPath); err != nil {
-			fmt.Printf("failed to unpin program array map %s: %v\n", config.GetProgramMap(), err)
-			os.Exit(1)
-		}
-		fmt.Printf("Unpinned program array map %s\n", config.GetProgramMap())
 
-		fmt.Println("Unload complete.")
+		Debug("Unpinning program array map",
+			"name", config.GetProgramMap(),
+			"path", progMapPath)
+
+		if err := os.Remove(progMapPath); err != nil {
+			Fatal("Failed to unpin program array map",
+				"map", config.GetProgramMap(),
+				"error", err)
+		}
+
+		Info("Unpinned program array map", "name", config.GetProgramMap())
+
+		Info("Unload complete")
 	},
 }
 
-func init() {
-	RootCmd.AddCommand(unloadCmd)
-}

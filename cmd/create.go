@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -12,28 +11,33 @@ var createCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new ouroboros project",
 	Run: func(cmd *cobra.Command, args []string) {
+
+		Debug("Creating ouroboros project")
+
+		Debug("Creating source directory", "path", srcDir)
 		if err := os.Mkdir(srcDir, 0755); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			Fatal("Failed to create source directory", "path", srcDir, "error", err)
 		}
 
+		Debug("Creating target directory", "path", targetDir)
 		if err := os.Mkdir(targetDir, 0755); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			Fatal("Failed to create target directory", "path", targetDir, "error", err)
 		}
 
 		// Create src/_global directory
-		if err := os.MkdirAll(filepath.Join(srcDir, "_global"), 0755); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+		globalDir := filepath.Join(srcDir, "_global")
+		Debug("Creating global directory", "path", globalDir)
+		if err := os.MkdirAll(globalDir, 0755); err != nil {
+			Fatal("Failed to create global directory", "path", globalDir, "error", err)
 		}
 
 		// Create src/_ouroboros directory
+		Debug("Creating ouroboros global directory", "path", ouroborosGlobalDir)
 		if err := os.MkdirAll(ouroborosGlobalDir, 0755); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			Fatal("Failed to create ouroboros global directory", "path", ouroborosGlobalDir, "error", err)
 		}
 
+		Debug("Creating default configuration")
 		ouroborosConfig := &OuroborosConfig{
 			Programs: []Program{
 				{Name: "main", ID: 1, IsMain: true},
@@ -41,20 +45,17 @@ var createCmd = &cobra.Command{
 			CompileArgs: []string{"-Wall"},
 		}
 
+		Debug("Writing configuration file")
 		if err := WriteConfig(ouroborosConfig); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			Fatal("Failed to write config", "error", err)
 		}
 
+		Debug("Generating programs header")
 		if err := GenerateProgramsHeader(ouroborosConfig); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			Fatal("Failed to generate programs header", "error", err)
 		}
 
-		fmt.Println("ouroboros project created successfully.")
+		Info("Ouroboros project created successfully")
 	},
 }
 
-func init() {
-	RootCmd.AddCommand(createCmd)
-}

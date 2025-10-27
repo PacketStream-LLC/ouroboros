@@ -1,12 +1,57 @@
 # Usage
 ## Build Flows
-If you are using git, The `_ouroboros/` directory is automatically generated and should be ignored in your `.gitignore` file.,  
-This is intended to be a generated directory, so you don't need to check it into version control.  
+If you are using git, The `_ouroboros/` directory is automatically generated and should be ignored in your `.gitignore` file.,
+This is intended to be a generated directory, so you don't need to check it into version control.
 
-If you have cloned a repository that uses `ouroboros`, you can generate the `_ouroboros/` directory by running:  
+If you have cloned a repository that uses `ouroboros`, you can generate the `_ouroboros/` directory by running:
 ```bash
 ouroboros generate
 ```
+
+## Logging System
+
+Ouroboros uses a global logging system based on Go's standard `log/slog` library with structured key-value logging.
+
+### Global Logging Flags
+
+All commands support global logging flags:
+
+**Verbose Mode (`--verbose` or `-v`):**
+```bash
+ouroboros --verbose load          # Show detailed program loading information
+ouroboros -v unload               # Show detailed unload statistics
+ouroboros --verbose build         # Show detailed build steps
+ouroboros -v attach eth0          # Show detailed attach information
+```
+
+**Log Level (`--log-level`):**
+```bash
+ouroboros --log-level debug load  # Same as --verbose (DEBUG level)
+ouroboros --log-level info build  # Normal output (INFO level, default)
+ouroboros --log-level warn attach # Only warnings and errors
+ouroboros --log-level error run   # Only errors
+```
+
+The logging system provides:
+- Structured key-value pairs for easy parsing
+- All logging output goes to stderr (stdout remains clean for piped data)
+- Four log levels: `debug`, `info` (default), `warn`, `error`
+
+### Raw Mode
+For commands that output data streams (`log` and `map log`), you can use `--raw` or `-r` to completely disable logging:
+```bash
+ouroboros log --raw              # Pure kernel trace output, no logging
+ouroboros map log mymap --raw    # Pure event data, no logging
+
+# Examples with piping
+ouroboros log --raw | grep "error"
+ouroboros map log events --raw | jq .
+```
+
+Raw mode is useful for:
+- Piping output to other tools without log noise
+- Scripting and automation
+- Machine-readable output only
 
 ## Commands
 
@@ -146,8 +191,8 @@ ouroboros map list -t array         # Short flag version
 
 **Show program information:**
 ```bash
-ouroboros map list --verbose        # Show which programs use each map
-ouroboros map list -v               # Short flag version
+ouroboros --verbose map list        # Show which programs use each map
+ouroboros -v map list               # Short flag version
 ```
 
 ### Map Inspection

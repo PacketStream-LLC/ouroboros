@@ -15,9 +15,14 @@ var loadCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		config, err := ReadConfig()
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			Fatal("Failed to read config", "error", err)
 		}
+
+		Debug("Loading eBPF programs from config",
+			"bpf_base_dir", config.GetBpfBaseDir(),
+			"program_prefix", config.ProgramPrefix,
+			"program_map", config.GetProgramMap(),
+			"total_programs", len(config.Programs))
 
 		progmapSpec := &ebpf.MapSpec{
 			Name:       config.ProgramMap,
@@ -31,33 +36,49 @@ var loadCmd = &cobra.Command{
 		progmap, err := ebpf.NewMapWithOptions(progmapSpec, config.GetMapOptions())
 
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			Fatal("Failed to create program array map", "error", err)
 		}
 		defer progmap.Close()
 
-		if err := progmap.Pin(filepath.Join(config.GetBpfBaseDir(), config.GetProgramMap())); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+		progmapPath := filepath.Join(config.GetBpfBaseDir(), config.GetProgramMap())
+		if err := progmap.Pin(progmapPath); err != nil {
+			Fatal("Failed to pin program array map", "error", err, "path", progmapPath)
 		}
 
-		for _, prog := range config.Programs {
+		progmapInfo, _ := progmap.Info()
+		progmapID, _ := progmapInfo.ID()
+		Debug("Created program array map",
+			"name", config.GetProgramMap(),
+			"id", progmapID,
+			"pin_path", progmapPath)
+
+		for i, prog := range config.Programs {
 			progName := prog.Name
 			progID := prog.ID
 			objFile := filepath.Join("target", fmt.Sprintf("%s.o", progName))
 
+			Debug("Loading program",
+				"index", i+1,
+				"total", len(config.Programs),
+				"name", progName,
+				"object_file", objFile,
+				"program_id", progID)
+
 			collSpec, err := ebpf.LoadCollectionSpec(objFile)
 			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
+				Fatal("Failed to load collection spec", "error", err, "file", objFile)
 			}
+
+			Debug("Loaded collection spec",
+				"programs_count", len(collSpec.Programs),
+				"maps_count", len(collSpec.Maps),
+				"entrypoint", prog.Entrypoint)
 
 			coll, err := ebpf.NewCollectionWithOptions(collSpec, ebpf.CollectionOptions{
 				Maps: config.GetMapOptions(),
 			})
 			if err != nil {
-				fmt.Println(err)
-				os.Exit(1)
+				Fatal("Failed to create collection", "error", err, "program", progName)
 			}
 			defer coll.Close()
 
@@ -78,10 +99,14 @@ var loadCmd = &cobra.Command{
 						break
 					}
 
-					fmt.Printf("No xdp program named %s in %s. falling back to %s\n", progName, objFile, progNameAuto)
+					Warn("Program not found by name, using fallback",
+						"requested", progName,
+						"using", progNameAuto,
+						"file", objFile)
 				} else {
-					fmt.Printf("program %s not found in %s\n", progName, objFile)
-					os.Exit(1)
+					Fatal("Program not found in collection",
+						"program", progName,
+						"file", objFile)
 				}
 			}
 
@@ -89,11 +114,11 @@ var loadCmd = &cobra.Command{
 
 			// check if pinPath exists
 			if _, err := os.Stat(pinPath); err == nil {
+				Debug("Existing program found, unpinning", "path", pinPath)
 				prePinnedProgram, err := ebpf.LoadPinnedProgram(pinPath, &ebpf.LoadPinOptions{})
 				if err == nil {
 					if err := prePinnedProgram.Unpin(); err != nil {
-						fmt.Println(err)
-						os.Exit(1)
+						Fatal("Failed to unpin existing program", "error", err, "path", pinPath)
 					}
 				}
 
@@ -101,27 +126,32 @@ var loadCmd = &cobra.Command{
 				if _, err := os.Stat(pinPath); err == nil {
 					err = os.Remove(pinPath)
 					if err != nil {
-						fmt.Println("Failed to cleanup existing pinPath:", err)
-						os.Exit(1)
+						Fatal("Failed to cleanup existing pin path", "error", err, "path", pinPath)
 					}
 				}
 			}
 
 			if err := xdpProg.Pin(pinPath); err != nil {
-				fmt.Println("error while pinning program.", err)
-				os.Exit(1)
+				Fatal("Failed to pin program", "error", err, "path", pinPath)
 			}
+
+			progInfo, _ := xdpProg.Info()
+			progKernelID, _ := progInfo.ID()
+			Debug("Pinned program",
+				"path", pinPath,
+				"kernel_id", progKernelID,
+				"fd", xdpProg.FD())
 
 			if err := progmap.Put(uint32(progID), uint32(xdpProg.FD())); err != nil {
-				fmt.Println("error while updating progmap", err)
-				os.Exit(1)
+				Fatal("Failed to update program array", "error", err, "program_id", progID)
 			}
+
+			Debug("Added to program array", "index", progID)
+
+			Info("Loaded program", "name", prog.Name, "id", progID)
 		}
 
-		fmt.Println("Load complete.")
+		Info("Load complete")
 	},
 }
 
-func init() {
-	RootCmd.AddCommand(loadCmd)
-}

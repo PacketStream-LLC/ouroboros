@@ -24,15 +24,14 @@ var mergeCmd = &cobra.Command{
 WARNING: This feature is experimental and may not work correctly in all cases.`,
 	Args: cobra.RangeArgs(0, 2),
 	Run: func(cmd *cobra.Command, args []string) {
+
 		if _, err := os.Stat("/usr/include/bpf/bpf.h"); os.IsNotExist(err) {
-			fmt.Println("libbpf-dev is not installed. Please install it first.")
-			os.Exit(1)
+			Fatal("libbpf-dev is not installed. Please install it first")
 		}
 
 		ouroborosConfig, err := ReadConfig()
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			Fatal("Failed to read config", "error", err)
 		}
 
 		var srcProg *Program
@@ -43,16 +42,16 @@ WARNING: This feature is experimental and may not work correctly in all cases.`,
 			// No arguments: merge all into main program
 			srcProg = ouroborosConfig.GetMainProgram()
 			if srcProg == nil {
-				fmt.Println("No main program defined in ouroboros.json")
-				fmt.Println("Please set 'is_main: true' for one program or specify programs explicitly")
-				os.Exit(1)
+				Fatal("No main program defined in ouroboros.json. Please set 'is_main: true' for one program or specify programs explicitly")
 			}
-			fmt.Printf("Using main program '%s' as merge target\n", srcProg.Name)
+			Info("Using main program as merge target", "program", srcProg.Name)
 
 		case 2:
 			// Two arguments: merge target into src
 			srcName := args[0]
 			targetName := args[1]
+
+			Debug("Looking for source and target programs", "src", srcName, "target", targetName)
 
 			// Find src program
 			for i := range ouroborosConfig.Programs {
@@ -62,8 +61,7 @@ WARNING: This feature is experimental and may not work correctly in all cases.`,
 				}
 			}
 			if srcProg == nil {
-				fmt.Printf("Source program '%s' not found in ouroboros.json\n", srcName)
-				os.Exit(1)
+				Fatal("Source program not found in ouroboros.json", "program", srcName)
 			}
 
 			// Find target program
@@ -74,21 +72,21 @@ WARNING: This feature is experimental and may not work correctly in all cases.`,
 				}
 			}
 			if targetProg == nil {
-				fmt.Printf("Target program '%s' not found in ouroboros.json\n", targetName)
-				os.Exit(1)
+				Fatal("Target program not found in ouroboros.json", "program", targetName)
 			}
 
 		default:
-			fmt.Println("Invalid usage. Use:")
-			fmt.Println("  ouroboros merge              - Merge all programs into main program")
-			fmt.Println("  ouroboros merge [src] [target] - Merge target into src")
+			Error("Invalid usage")
+			Info("Use: ouroboros merge              - Merge all programs into main program")
+			Info("Use: ouroboros merge [src] [target] - Merge target into src")
 			os.Exit(1)
 		}
 
 		// Build all programs first
+		Debug("Building programs before merge")
 		buildCmd.Run(cmd, []string{})
 
-		fmt.Printf("Analyzing tail calls in %s...\n", srcProg.Name)
+		Info("Analyzing tail calls", "program", srcProg.Name)
 
 		// Analyze and merge
 		mergedObjectPath := filepath.Join(targetDir, fmt.Sprintf("%s.merged.o", srcProg.Name))
@@ -101,7 +99,7 @@ WARNING: This feature is experimental and may not work correctly in all cases.`,
 			mergeProgram(srcProg, ouroborosConfig, mergedObjectPath)
 		}
 
-		fmt.Printf("Merged object created at %s\n", mergedObjectPath)
+		Info("Merged object created", "output", mergedObjectPath)
 	},
 }
 
@@ -112,16 +110,16 @@ type TailCallInfo struct {
 }
 
 func mergeTwoPrograms(srcProg *Program, targetProg *Program, config *OuroborosConfig, outputPath string) {
-	fmt.Printf("Merging %s into %s...\n", targetProg.Name, srcProg.Name)
+	Info("Merging programs", "target", targetProg.Name, "into", srcProg.Name)
 
 	objectsToMerge := []string{
 		filepath.Join(targetDir, fmt.Sprintf("%s.o", srcProg.Name)),
 		filepath.Join(targetDir, fmt.Sprintf("%s.o", targetProg.Name)),
 	}
 
-	fmt.Printf("Merging 2 object files:\n")
+	Debug("Merging object files", "count", len(objectsToMerge))
 	for _, obj := range objectsToMerge {
-		fmt.Printf("  - %s\n", obj)
+		Debug("Object file", "path", obj)
 	}
 
 	// Link objects together (now handles tail call replacement in IR)
@@ -135,14 +133,14 @@ func mergeProgram(prog *Program, config *OuroborosConfig, outputPath string) {
 	// Collect all tail call targets recursively
 	collectTailCallTargets(prog, config, visited, &objectsToMerge)
 
-	fmt.Printf("Found %d object files to merge\n", len(objectsToMerge))
+	Info("Found object files to merge", "count", len(objectsToMerge))
 	for _, obj := range objectsToMerge {
-		fmt.Printf("  - %s\n", obj)
+		Debug("Object file", "path", obj)
 	}
 
 	// Link all objects together
 	if len(objectsToMerge) == 0 {
-		fmt.Println("No tail calls found, nothing to merge")
+		Info("No tail calls found, nothing to merge")
 		return
 	}
 
@@ -162,7 +160,7 @@ func collectTailCallTargets(prog *Program, config *OuroborosConfig, visited map[
 	// Load the program to analyze tail calls
 	progSpec, err := ebpf.LoadCollectionSpec(objectPath)
 	if err != nil {
-		fmt.Printf("Failed to load program object %s: %v\n", prog.Name, err)
+		Fatal("Failed to load program object", "program", prog.Name, "error", err)
 		os.Exit(1)
 	}
 
@@ -176,7 +174,7 @@ func collectTailCallTargets(prog *Program, config *OuroborosConfig, visited map[
 					mapIndex := insns[i-1].Constant
 					for j := range config.Programs {
 						if config.Programs[j].ID == int(mapIndex) {
-							fmt.Printf("  Found tail call: %s -> %s (ID: %d)\n", prog.Name, config.Programs[j].Name, mapIndex)
+							Debug("Found tail call", "from", prog.Name, "to", config.Programs[j].Name, "id", mapIndex)
 							// Recursively collect targets
 							collectTailCallTargets(&config.Programs[j], config, visited, objectsToMerge)
 						}
@@ -194,7 +192,7 @@ func deduplicateMapSymbols(objectPaths []string) ([]string, error) {
 		return objectPaths, nil
 	}
 
-	fmt.Println("Deduplicating symbols...")
+	Info("Deduplicating symbols")
 
 	// First file is the source - keep all its symbols
 	seenSymbols := make(map[string]bool)
@@ -224,7 +222,7 @@ func deduplicateMapSymbols(objectPaths []string) ([]string, error) {
 	}
 	firstElf.Close()
 
-	fmt.Printf("  Source file %s: keeping all %d global symbols\n", filepath.Base(objectPaths[0]), len(seenSymbols))
+	Debug("Source file: keeping all global symbols", "file", filepath.Base(objectPaths[0]), "count", len(seenSymbols))
 
 	dedupedPaths := make([]string, 0, len(objectPaths))
 	dedupedPaths = append(dedupedPaths, objectPaths[0]) // Keep first as-is
@@ -265,12 +263,12 @@ func deduplicateMapSymbols(objectPaths []string) ([]string, error) {
 		if len(duplicates) == 0 {
 			// No duplicates, use original
 			dedupedPaths = append(dedupedPaths, objPath)
-			fmt.Printf("  %s: no duplicate symbols\n", filepath.Base(objPath))
+			Debug("No duplicate symbols", "file", filepath.Base(objPath))
 			continue
 		}
 
 		// Create modified copy with duplicates removed
-		fmt.Printf("  %s: removing %d duplicate symbols\n", filepath.Base(objPath), len(duplicates))
+		Debug("Removing duplicate symbols", "file", filepath.Base(objPath), "count", len(duplicates))
 		tempPath := objPath + ".dedup.o"
 		if err := removeSymbolsFromELF(objPath, tempPath, duplicates); err != nil {
 			return nil, fmt.Errorf("failed to remove symbols from %s: %w", objPath, err)
@@ -453,7 +451,7 @@ func linkObjects(objectPaths []string, outputPath string) {
 		}
 
 		if prog == nil {
-			fmt.Printf("Warning: Program %s not found in config\n", progName)
+			Warn("Program not found in config", "program", progName)
 			continue
 		}
 
@@ -471,7 +469,7 @@ func linkObjects(objectPaths []string, outputPath string) {
 		clangCmd.Stdout = os.Stdout
 		clangCmd.Stderr = os.Stderr
 		if err := clangCmd.Run(); err != nil {
-			fmt.Printf("Failed to compile %s to LLVM IR: %v\n", progName, err)
+			Fatal("Failed to compile to LLVM IR", "program", progName, "error", err)
 			os.Exit(1)
 		}
 
@@ -494,14 +492,14 @@ func linkObjects(objectPaths []string, outputPath string) {
 	llvmLinkCmd.Stdout = os.Stdout
 	llvmLinkCmd.Stderr = os.Stderr
 	if err := llvmLinkCmd.Run(); err != nil {
-		fmt.Printf("llvm-link failed: %v\n", err)
+		Fatal("llvm-link failed", "error", err)
 		os.Exit(1)
 	}
 
 	// Step 2.5: Replace tail calls in merged LLVM IR
 	fmt.Printf("  Replacing tail calls with direct function calls in IR...\n")
 	if err := replaceTailCallsInIR(mergedLL, config); err != nil {
-		fmt.Printf("Failed to replace tail calls: %v\n", err)
+		Fatal("Failed to replace tail calls", "error", err)
 		os.Exit(1)
 	}
 
@@ -515,7 +513,7 @@ func linkObjects(objectPaths []string, outputPath string) {
 	clangCmd.Stdout = os.Stdout
 	clangCmd.Stderr = os.Stderr
 	if err := clangCmd.Run(); err != nil {
-		fmt.Printf("Failed to compile merged LLVM IR: %v\n", err)
+		Fatal("Failed to compile merged LLVM IR", "error", err)
 		os.Exit(1)
 	}
 
@@ -1110,6 +1108,3 @@ func patchELFSection(elfPath string, sectionName string, newData []byte) error {
 	return os.WriteFile(elfPath, data, 0644)
 }
 
-func init() {
-	RootCmd.AddCommand(mergeCmd)
-}

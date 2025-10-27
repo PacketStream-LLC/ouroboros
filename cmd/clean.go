@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -14,36 +13,37 @@ var cleanCmd = &cobra.Command{
 	Long: `Removes the target directory containing compiled eBPF objects (.o files),
 LLVM IR files (.ll files), and other build artifacts.`,
 	Run: func(cmd *cobra.Command, args []string) {
+
 		// Check if target directory exists
 		if _, err := os.Stat(targetDir); os.IsNotExist(err) {
-			fmt.Println("Nothing to clean: target directory does not exist.")
+			Info("Nothing to clean: target directory does not exist")
 			return
 		}
 
+		Debug("Removing target directory", "path", targetDir)
+
 		// Remove the entire target directory
-		fmt.Printf("Removing %s directory...\n", targetDir)
 		if err := os.RemoveAll(targetDir); err != nil {
-			fmt.Printf("Error: failed to remove %s: %v\n", targetDir, err)
-			os.Exit(1)
+			Fatal("Failed to remove target directory", "path", targetDir, "error", err)
 		}
+
+		Info("Removed target directory", "path", targetDir)
 
 		// Also clean up any .ll or .o files in the root directory (just in case)
 		cleanPatterns := []string{"*.ll", "*.o", "*.merged.o"}
 		for _, pattern := range cleanPatterns {
 			matches, err := filepath.Glob(pattern)
 			if err != nil {
+				Debug("Failed to glob pattern", "pattern", pattern, "error", err)
 				continue
 			}
 			for _, file := range matches {
-				fmt.Printf("Removing %s...\n", file)
+				Debug("Removing file", "file", file)
 				os.Remove(file)
 			}
 		}
 
-		fmt.Println("Clean complete.")
+		Info("Clean complete")
 	},
 }
 
-func init() {
-	RootCmd.AddCommand(cleanCmd)
-}

@@ -32,16 +32,17 @@ var mapListCmd = &cobra.Command{
 This includes map type, key size, value size, and max entries.
 Matches bpftool map list output format.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		// Get verbose from root flags
+		verbose, _ := cmd.Root().PersistentFlags().GetBool("verbose")
+
 		config, err := ReadConfig()
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			Fatal("Failed to read config", "error", err)
 		}
 
 		// Check if target directory exists
 		if _, err := os.Stat("target"); os.IsNotExist(err) {
-			fmt.Println("Error: target directory not found. Run 'ouroboros build' first.")
-			os.Exit(1)
+			Fatal("Target directory not found. Run 'ouroboros build' first")
 		}
 
 		allMaps := make(map[string]*MapInfo)
@@ -52,17 +53,17 @@ Matches bpftool map list output format.`,
 			objFile := filepath.Join("target", fmt.Sprintf("%s.o", progName))
 
 			if _, err := os.Stat(objFile); os.IsNotExist(err) {
-				if verbose {
-					fmt.Printf("Warning: %s not found, skipping %s\n", objFile, progName)
-				}
+				Debug("Object file not found, skipping",
+					"file", objFile,
+					"program", progName)
 				continue
 			}
 
 			collSpec, err := ebpf.LoadCollectionSpec(objFile)
 			if err != nil {
-				if verbose {
-					fmt.Printf("Warning: failed to load %s: %v\n", objFile, err)
-				}
+				Warn("Failed to load collection spec",
+					"file", objFile,
+					"error", err)
 				continue
 			}
 
@@ -86,7 +87,7 @@ Matches bpftool map list output format.`,
 		}
 
 		if len(allMaps) == 0 {
-			fmt.Println("No maps found in compiled programs.")
+			Info("No maps found in compiled programs")
 			return
 		}
 
@@ -109,11 +110,9 @@ Matches bpftool map list output format.`,
 		if mapTypeFilter != "" {
 			filterType := parseMapType(mapTypeFilter)
 			if filterType == ebpf.UnspecifiedMap {
-				fmt.Printf("Error: unknown map type '%s'\n", mapTypeFilter)
-				fmt.Println("Valid types: hash, array, prog_array, perf_event_array, percpu_hash,")
-				fmt.Println("             percpu_array, stack_trace, cgroup_array, lru_hash,")
-				fmt.Println("             lru_percpu_hash, lpm_trie, array_of_maps, hash_of_maps,")
-				fmt.Println("             devmap, sockmap, cpumap, xskmap, ringbuf, etc.")
+				Error("Unknown map type",
+					"type", mapTypeFilter,
+					"valid_types", "hash, array, prog_array, perf_event_array, percpu_hash, percpu_array, stack_trace, cgroup_array, lru_hash, lru_percpu_hash, lpm_trie, array_of_maps, hash_of_maps, devmap, sockmap, cpumap, xskmap, ringbuf")
 				os.Exit(1)
 			}
 			filteredMaps = make(map[string]*MapInfo)
@@ -128,9 +127,9 @@ Matches bpftool map list output format.`,
 
 		if len(filteredMaps) == 0 {
 			if mapTypeFilter != "" {
-				fmt.Printf("No maps of type '%s' found.\n", mapTypeFilter)
+				Info("No maps of specified type found", "type", mapTypeFilter)
 			} else {
-				fmt.Println("No maps found in compiled programs.")
+				Info("No maps found in compiled programs")
 			}
 			return
 		}
@@ -159,14 +158,12 @@ You can specify the map by name or kernel ID.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		config, err := ReadConfig()
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			Fatal("Failed to read config", "error", err)
 		}
 
 		// Check if target directory exists
 		if _, err := os.Stat("target"); os.IsNotExist(err) {
-			fmt.Println("Error: target directory not found. Run 'ouroboros build' first.")
-			os.Exit(1)
+			Fatal("Target directory not found. Run 'ouroboros build' first")
 		}
 
 		allMaps := make(map[string]*MapInfo)
@@ -236,8 +233,7 @@ You can specify the map by name or kernel ID.`,
 		}
 
 		if targetMap == nil {
-			fmt.Printf("Error: map '%s' not found\n", targetName)
-			os.Exit(1)
+			Fatal("Map not found", "map", targetName)
 		}
 
 		printMapInfoDetailed(config, targetMap)
@@ -632,12 +628,16 @@ Press Ctrl-C to stop reading events.`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		mapName := args[0]
-		verbose, _ := cmd.Flags().GetBool("verbose")
+		raw, _ := cmd.Flags().GetBool("raw")
+
+		// Raw mode disables all logging
+		if raw {
+			SetRawMode(true)
+		}
 
 		config, err := ReadConfig()
 		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-			os.Exit(1)
+			Fatal("Failed to read config", "error", err)
 		}
 
 		// Resolve map path
@@ -645,44 +645,43 @@ Press Ctrl-C to stop reading events.`,
 
 		// Check if map exists
 		if _, err := os.Stat(pinPath); err != nil {
-			fmt.Printf("Error: map '%s' not found at %s\n", mapName, pinPath)
-			os.Exit(1)
+			Fatal("Map not found",
+				"map", mapName,
+				"path", pinPath)
 		}
 
 		// Load the pinned map
 		m, err := ebpf.LoadPinnedMap(pinPath, nil)
 		if err != nil {
-			fmt.Printf("Error: failed to load map '%s': %v\n", mapName, err)
-			os.Exit(1)
+			Fatal("Failed to load pinned map",
+				"map", mapName,
+				"error", err)
 		}
 		defer m.Close()
 
 		// Verify it's a ringbuf map
 		info, err := m.Info()
 		if err != nil {
-			fmt.Printf("Error: failed to get map info: %v\n", err)
-			os.Exit(1)
+			Fatal("Failed to get map info", "error", err)
 		}
 
 		if info.Type != ebpf.RingBuf {
-			fmt.Printf("Error: map '%s' is not a ringbuf (type: %s)\n", mapName, info.Type)
-			os.Exit(1)
+			Fatal("Map is not a ringbuf",
+				"map", mapName,
+				"type", info.Type)
 		}
 
-		if verbose {
-			mapID, _ := info.ID()
-			fmt.Fprintf(os.Stderr, "Reading from ringbuf map: %s\n", mapName)
-			fmt.Fprintf(os.Stderr, "  Map ID: %d\n", mapID)
-			fmt.Fprintf(os.Stderr, "  Pin path: %s\n", pinPath)
-			fmt.Fprintf(os.Stderr, "  Max entries: %d\n", info.MaxEntries)
-			fmt.Fprintf(os.Stderr, "Starting event reader... (Press Ctrl-C to stop)\n\n")
-		}
+		mapID, _ := info.ID()
+		Debug("Reading from ringbuf map",
+			"map", mapName,
+			"id", mapID,
+			"path", pinPath,
+			"max_entries", info.MaxEntries)
 
 		// Create ringbuf reader
 		rd, err := ringbuf.NewReader(m)
 		if err != nil {
-			fmt.Printf("Error: failed to create ringbuf reader: %v\n", err)
-			os.Exit(1)
+			Fatal("Failed to create ringbuf reader", "error", err)
 		}
 		defer rd.Close()
 
@@ -720,10 +719,9 @@ Press Ctrl-C to stop reading events.`,
 
 					eventCount++
 
-					if verbose {
-						// Print event metadata to stderr
-						fmt.Fprintf(os.Stderr, "[Event #%d] size=%d bytes\n", eventCount, len(record.RawSample))
-					}
+					Debug("Received event",
+						"number", eventCount,
+						"size", len(record.RawSample))
 
 					// Print the raw data directly to stdout
 					os.Stdout.Write(record.RawSample)
@@ -733,10 +731,8 @@ Press Ctrl-C to stop reading events.`,
 
 		// Wait for interrupt signal
 		<-sig
-		if verbose {
-			fmt.Fprintf(os.Stderr, "\nTotal events read: %d\n", eventCount)
-		}
-		fmt.Fprintln(os.Stderr, "Stopping...")
+		Debug("Total events read", "count", eventCount)
+		Info("Stopping event reader")
 		close(done)
 	},
 }
@@ -851,7 +847,6 @@ func execBpftool(bpftoolPath string, args []string) {
 }
 
 func init() {
-	RootCmd.AddCommand(mapCmd)
 	mapCmd.AddCommand(mapListCmd)
 	mapCmd.AddCommand(mapShowCmd)
 	mapCmd.AddCommand(mapFlowCmd)
@@ -874,8 +869,7 @@ func init() {
 		createPassthroughCmd("freeze"),
 	)
 
-	mapListCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show program information (like bpftool pids)")
 	mapListCmd.Flags().StringVarP(&mapTypeFilter, "type", "t", "", "Filter maps by type (e.g., hash, array, ringbuf)")
 	mapFlowCmd.Flags().StringP("output", "o", "", "Output file path (default: map.mermaid)")
-	mapLogCmd.Flags().BoolP("verbose", "v", false, "Show detailed event information (event count, size, and statistics)")
+	mapLogCmd.Flags().BoolP("raw", "r", false, "Raw mode: disable all logging output (only event data)")
 }

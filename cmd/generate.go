@@ -29,36 +29,34 @@ var generateCmd = &cobra.Command{
 	Use:   "generate",
 	Short: "Generate _ouroboros related files",
 	Run: func(cmd *cobra.Command, args []string) {
+
 		ouroborosConfig, err := ReadConfig()
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			Fatal("Failed to read config", "error", err)
 		}
 
+		Debug("Generating programs header")
 		if err := GenerateProgramsHeader(ouroborosConfig); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			Fatal("Failed to generate programs header", "error", err)
 		}
 
 		if ide != "" {
+			Debug("Generating IDE configuration", "ide", ide)
 			switch ide {
 			case "vscode":
 				if err := GenerateVSCodeConfig(); err != nil {
-					fmt.Println(err)
-					os.Exit(1)
+					Fatal("Failed to generate VS Code config", "error", err)
 				}
 			case "intellij":
 				if err := GenerateCLionConfig(); err != nil {
-					fmt.Println(err)
-					os.Exit(1)
+					Fatal("Failed to generate CLion config", "error", err)
 				}
 			default:
-				fmt.Printf("unsupported ide: %s\n", ide)
-				os.Exit(1)
+				Fatal("Unsupported IDE", "ide", ide)
 			}
 		}
 
-		fmt.Println("Generated _ouroboros files successfully.")
+		Info("Generated _ouroboros files successfully")
 	},
 }
 
@@ -85,7 +83,7 @@ func GenerateProgramsHeader(config *OuroborosConfig) error {
 		return fmt.Errorf("failed to execute template: %w", err)
 	}
 
-	fmt.Printf("Generated %s\n", programsHeaderPath)
+	Info("Generated programs header", "path", programsHeaderPath)
 	return nil
 }
 
@@ -112,7 +110,7 @@ func GenerateGitignore() error {
 		return fmt.Errorf("failed to execute gitignore template: %w", err)
 	}
 
-	fmt.Printf("Generated %s\n", gitignorePath)
+	Info("Generated gitignore", "path", gitignorePath)
 	return nil
 }
 
@@ -124,7 +122,7 @@ func GenerateVSCodeConfig() error {
 
 	cCppPropertiesPath := filepath.Join(vscodeDir, "c_cpp_properties.json")
 	if _, err := os.Stat(cCppPropertiesPath); err == nil && !overwrite {
-		fmt.Printf("file %s already exists, use --overwrite to force overwrite\n", cCppPropertiesPath)
+		Info("File already exists, use --overwrite to force overwrite", "path", cCppPropertiesPath)
 		return nil
 	}
 
@@ -143,14 +141,14 @@ func GenerateVSCodeConfig() error {
 		return fmt.Errorf("failed to execute template: %w", err)
 	}
 
-	fmt.Printf("Generated %s\n", cCppPropertiesPath)
+	Info("Generated VS Code config", "path", cCppPropertiesPath)
 	return nil
 }
 
 func GenerateCLionConfig() error {
 	clangdPath := ".clangd"
 	if _, err := os.Stat(clangdPath); err == nil && !overwrite {
-		fmt.Printf("file %s already exists, use --overwrite to force overwrite\n", clangdPath)
+		Info("File already exists, use --overwrite to force overwrite", "path", clangdPath)
 		return nil
 	}
 
@@ -174,12 +172,7 @@ func GenerateCLionConfig() error {
 		return fmt.Errorf("failed to execute template: %w", err)
 	}
 
-	fmt.Printf("Generated %s\n", clangdPath)
+	Info("Generated CLion config", "path", clangdPath)
 	return nil
 }
 
-func init() {
-	RootCmd.AddCommand(generateCmd)
-	generateCmd.Flags().StringVar(&ide, "ide", "", "Generate IDE configuration files (vscode, intellij)")
-	generateCmd.Flags().BoolVar(&overwrite, "overwrite", false, "Overwrite existing IDE configuration files")
-}
