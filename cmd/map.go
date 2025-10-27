@@ -632,6 +632,7 @@ Press Ctrl-C to stop reading events.`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		mapName := args[0]
+		verbose, _ := cmd.Flags().GetBool("verbose")
 
 		config, err := ReadConfig()
 		if err != nil {
@@ -668,6 +669,15 @@ Press Ctrl-C to stop reading events.`,
 			os.Exit(1)
 		}
 
+		if verbose {
+			mapID, _ := info.ID()
+			fmt.Fprintf(os.Stderr, "Reading from ringbuf map: %s\n", mapName)
+			fmt.Fprintf(os.Stderr, "  Map ID: %d\n", mapID)
+			fmt.Fprintf(os.Stderr, "  Pin path: %s\n", pinPath)
+			fmt.Fprintf(os.Stderr, "  Max entries: %d\n", info.MaxEntries)
+			fmt.Fprintf(os.Stderr, "Starting event reader... (Press Ctrl-C to stop)\n\n")
+		}
+
 		// Create ringbuf reader
 		rd, err := ringbuf.NewReader(m)
 		if err != nil {
@@ -682,6 +692,9 @@ Press Ctrl-C to stop reading events.`,
 
 		// Channel to signal the reader goroutine to stop
 		done := make(chan struct{})
+
+		// Event counter for verbose mode
+		eventCount := uint64(0)
 
 		// Read events in a goroutine
 		go func() {
@@ -705,6 +718,13 @@ Press Ctrl-C to stop reading events.`,
 						continue
 					}
 
+					eventCount++
+
+					if verbose {
+						// Print event metadata to stderr
+						fmt.Fprintf(os.Stderr, "[Event #%d] size=%d bytes\n", eventCount, len(record.RawSample))
+					}
+
 					// Print the raw data directly to stdout
 					os.Stdout.Write(record.RawSample)
 				}
@@ -713,7 +733,10 @@ Press Ctrl-C to stop reading events.`,
 
 		// Wait for interrupt signal
 		<-sig
-		fmt.Fprintln(os.Stderr, "\nStopping...")
+		if verbose {
+			fmt.Fprintf(os.Stderr, "\nTotal events read: %d\n", eventCount)
+		}
+		fmt.Fprintln(os.Stderr, "Stopping...")
 		close(done)
 	},
 }
@@ -854,4 +877,5 @@ func init() {
 	mapListCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show program information (like bpftool pids)")
 	mapListCmd.Flags().StringVarP(&mapTypeFilter, "type", "t", "", "Filter maps by type (e.g., hash, array, ringbuf)")
 	mapFlowCmd.Flags().StringP("output", "o", "", "Output file path (default: map.mermaid)")
+	mapLogCmd.Flags().BoolP("verbose", "v", false, "Show detailed event information (event count, size, and statistics)")
 }
