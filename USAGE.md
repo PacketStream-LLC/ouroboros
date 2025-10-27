@@ -9,21 +9,45 @@ ouroboros generate
 ```
 
 ## Commands
+
+### Project Management
 | Command | Description |
 | --- | --- |
 | `ouroboros create` | Create a new ouroboros project in current directory |
-| `ouroboros add <name>` | Add a new eBPF program to your project. |
-| `ouroboros build` | Compile all eBPF programs in the project. |
-| `ouroboros load` | Load the compiled eBPF programs into the kernel. |
-| `ouroboros unload` | Unload the compiled eBPF programs from the kernel and unpin maps. |
-| `ouroboros reload` | Unload and then load the eBPF programs and maps. |
-| `ouroboros attach <interface>` | Attach eBPF programs to a specified interface. |
-| `ouroboros detach <interface>` | Detach eBPF programs from a specified interface. |
-| `ouroboros run <interface>` | Build, load, attach, and show log at the same time. |
-| `ouroboros log` | Attach to kernel tracing for debugging ebpf_printk. |
+| `ouroboros add <name>` | Add a new eBPF program to your project |
 | `ouroboros generate` | Generate _ouroboros related files (e.g., headers, maps) |
-| `ouroboros map` | List all eBPF maps discovered in compiled programs with their specifications. |
-| `ouroboros flow [output_file]` | Analyze the tail call flow and generate a Mermaid flowchart. |
+| `ouroboros clean` | Remove all build artifacts and temporary files |
+
+### Build & Deploy
+| Command | Description |
+| --- | --- |
+| `ouroboros build` | Compile all eBPF programs in the project |
+| `ouroboros load` | Load the compiled eBPF programs into the kernel |
+| `ouroboros unload` | Unload the compiled eBPF programs from the kernel and unpin maps |
+| `ouroboros reload` | Unload and then load the eBPF programs and maps |
+| `ouroboros attach <interface>` | Attach eBPF programs to a specified interface (with persistent pinned link) |
+| `ouroboros detach <interface>` | Detach eBPF programs from a specified interface |
+| `ouroboros run <interface>` | Build, load, attach, and show log at the same time |
+
+### Map Operations
+| Command | Description |
+| --- | --- |
+| `ouroboros map list` | List all eBPF maps discovered in compiled programs |
+| `ouroboros map list --type=<type>` | Filter maps by type (hash, array, ringbuf, etc.) |
+| `ouroboros map show [name\|id]` | Show details of a specific map |
+| `ouroboros map flow [map-name]` | Generate Mermaid diagram showing program dependencies for maps |
+| `ouroboros map log <name>` | Read and print ringbuf events from a map (raw output) |
+| `ouroboros map dump <name>` | Dump map contents (pass-through to bpftool) |
+| `ouroboros map update <name> ...` | Update map entry (pass-through to bpftool) |
+| `ouroboros map lookup <name> ...` | Lookup map entry (pass-through to bpftool) |
+| `ouroboros map delete <name> ...` | Delete map entry (pass-through to bpftool) |
+| `ouroboros map getnext <name> ...` | Get next map key (pass-through to bpftool) |
+
+### Analysis & Debugging
+| Command | Description |
+| --- | --- |
+| `ouroboros log` | Attach to kernel tracing for debugging bpf_trace_printk |
+| `ouroboros flow [output_file]` | Analyze the tail call flow and generate a Mermaid flowchart |
 
 ## `ouroboros.json`
 
@@ -40,13 +64,6 @@ The `ouroboros.json` file is the heart of your project. It defines the programs,
   ],
   "program_map": "ouroboros_programs",
   "program_prefix": "ouroboros_",
-  "shared_maps": [
-    {
-      "name": "events",
-      "type": "RingBuf",
-      "max_entries": 65536
-    }
-  ],
   "compile_args": [
     "-Wall"
   ]
@@ -59,10 +76,6 @@ The `ouroboros.json` file is the heart of your project. It defines the programs,
   - `is_main`:  Indicates which program is the entry point.
 - **`program_map`**: The name of the eBPF map that holds the program array for tail calls.
 - **`program_prefix`**: A prefix for all the programs when they are loaded into the kernel.
-- **`shared_maps`**: A list of eBPF maps that are shared between all the programs.
-  - `name`: The name of the map.
-  - `type`: The type of the map (e.g., `RingBuf`, `Hash`, `Array`).
-  - `max_entries`: The maximum number of entries in the map.
 - **`compile_args`**: A list of arguments to pass to `clang` when compiling the programs.
 
 ## `_global` directory
@@ -104,48 +117,147 @@ By default if you are using `ouroboros build` command to build, you can include 
 `ouroboros` also generates a header file at `src/_ouroboros/maps.h` with definitions for your shared maps.  
 This is automatically machine generated and can be imported via `src/_ouroboros/maps.h` in your C code, so you don't need to keep track of which maps are available by looking at `/sys/fs/bpf/` or `bpftool` output.
 
-## Map Discovery
+## Map Operations
 
-The `ouroboros map` command analyzes compiled eBPF programs and lists all discovered maps with their specifications:
+### Map Discovery and Listing
+
+The `ouroboros map list` command analyzes compiled eBPF programs and lists all discovered maps in bpftool-compatible format:
 
 ```bash
-ouroboros map
+ouroboros map list
 ```
 
-This command:
-- Parses compiled `.o` files from the `target/` directory
-- Extracts map metadata (type, key size, value size, max entries)
-- Shows which programs use each map
-- Identifies potential shared maps (used in multiple programs or prefixed with `shared_`)
-
-Example output:
+Example output (matches `bpftool map` format):
 ```
-Maps discovered in compiled programs:
-
-📍 events
-   Type:        RingBuf
-   Key Size:    0 bytes
-   Value Size:  0 bytes
-   Max Entries: 65536
-   Program:     main
-
-📍 shared_config
-   Type:        Hash
-   Key Size:    4 bytes
-   Value Size:  64 bytes
-   Max Entries: 1024
-   Programs:    main, filter, process
-
-Total: 2 map(s) discovered
-
-Potential shared maps (1):
-  - shared_config (used in: main, filter, process)
+20: prog_array  name hs_programs  flags 0x0
+    key 4B  value 4B  max_entries 65535  memlock 524544B
+21: hash  name global_bucket_s  flags 0x0
+    key 16B  value 8B  max_entries 10000000  memlock 988438528B
+23: ringbuf  name global_session_  flags 0x0
+    key 0B  value 0B  max_entries 4096  memlock 16680B
 ```
 
-Use `--verbose` flag for more detailed information:
+**Filter by map type:**
 ```bash
-ouroboros map -v
+ouroboros map list --type=hash      # List only hash maps
+ouroboros map list --type=ringbuf   # List only ringbuf maps
+ouroboros map list -t array         # Short flag version
 ```
+
+**Show program information:**
+```bash
+ouroboros map list --verbose        # Show which programs use each map
+ouroboros map list -v               # Short flag version
+```
+
+### Map Inspection
+
+**Show detailed map information:**
+```bash
+ouroboros map show mc_sessions
+```
+
+**Generate map dependency diagram:**
+```bash
+ouroboros map flow                  # All maps
+ouroboros map flow test_sessions     # Specific map
+```
+
+### Real-time Map Monitoring
+
+**Monitor ringbuf events (raw output):**
+```bash
+ouroboros map log json_ringbuf              # Print raw bytes to stdout
+ouroboros map log json_ringbuf | jq .       # Parse as JSON
+ouroboros map log json_ringbuf > events.log # Save to file
+```
+
+### Map Manipulation (bpftool pass-through)
+
+All standard bpftool map operations work with automatic map name resolution (requires `bpftool` to be installed on host):
+
+```bash
+# Dump map contents
+ouroboros map dump sessions
+ouroboros map dump sessions --json --pretty
+
+# Update map entry
+ouroboros map update sessions key hex 0x12 0x34 value hex 0x56 0x78
+
+# Lookup map entry
+ouroboros map lookup sessions key hex 0x12 0x34
+
+# Delete map entry
+ouroboros map delete sessions key hex 0x12 0x34
+
+# Get next key
+ouroboros map getnext sessions key hex 0x12 0x34
+```
+
+**How it works:**
+- Map names are automatically resolved to pinned paths
+- `ouroboros map dump sessions` → `bpftool map dump pinned /sys/fs/bpf/sessions`
+  (Supposing `/sys/fs/bpf` was set for the bpfPath)
+- All flags and arguments are passed through to bpftool
+
+## Attaching Programs to Interfaces
+
+The `attach` and `detach` commands manage XDP program attachments to network interfaces with persistent pinned links.
+
+### Attach Program
+```bash
+sudo ouroboros attach eth0
+# Output:
+# Successfully attached program to interface eth0
+# Link pinned at: /sys/fs/bpf/link_main_eth0
+```
+
+**Features:**
+- Creates a persistent pinned link at `/sys/fs/bpf/link_{program}_{interface}`
+- Attachment survives command exit and persists in the kernel
+- Link file enables proper cleanup with detach command
+
+### Detach Program
+```bash
+sudo ouroboros detach eth0
+# Output:
+# Successfully detached program from interface eth0 (via pinned link)
+```
+
+**Fallback mechanism:**
+- First tries to use pinned link (preferred method)
+- Falls back to netlink if no pinned link exists
+- Works with programs attached by other tools or manually
+
+**Example workflow:**
+```bash
+# Clean slate
+sudo ouroboros detach eth0
+
+# Build and attach
+sudo ouroboros build
+sudo ouroboros load
+sudo ouroboros attach eth0
+
+# Program stays attached even after terminal closes
+# Verify with: ip link show eth0
+
+# Later, clean up
+sudo ouroboros detach eth0
+sudo ouroboros unload
+```
+
+## Cleaning Build Artifacts
+
+Remove all build artifacts and temporary files:
+
+```bash
+ouroboros clean
+```
+
+This removes:
+- `target/` directory (all compiled `.o` files, `.ll` files, `.merged.o` files)
+- Any stray build artifacts in the project root
 
 ## Flowchart Generation
 

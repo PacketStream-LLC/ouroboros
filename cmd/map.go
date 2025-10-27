@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -150,11 +151,11 @@ Matches bpftool map list output format.`,
 }
 
 var mapShowCmd = &cobra.Command{
-	Use:   "show [name|id]",
+	Use:   "show <name|id>",
 	Short: "Show details of a specific map",
 	Long: `Show detailed information about a specific eBPF map.
 You can specify the map by name or kernel ID.`,
-	Args: cobra.MaximumNArgs(1),
+	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		config, err := ReadConfig()
 		if err != nil {
@@ -212,21 +213,6 @@ You can specify the map by name or kernel ID.`,
 				mapInfo.Pinned = true
 				m.Close()
 			}
-		}
-
-		// If no args, show all maps (same as list but more verbose)
-		if len(args) == 0 {
-			mapNames := make([]string, 0, len(allMaps))
-			for name := range allMaps {
-				mapNames = append(mapNames, name)
-			}
-			sort.Strings(mapNames)
-
-			for _, name := range mapNames {
-				mapInfo := allMaps[name]
-				printMapInfoDetailed(config, mapInfo)
-			}
-			return
 		}
 
 		// Find specific map by name or ID
@@ -706,7 +692,7 @@ Press Ctrl-C to stop reading events.`,
 				default:
 					record, err := rd.Read()
 					if err != nil {
-						if err == ringbuf.ErrClosed {
+						if errors.Is(err, ringbuf.ErrClosed) {
 							return
 						}
 						// Only print error if we're not shutting down
