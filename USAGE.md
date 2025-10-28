@@ -96,7 +96,7 @@ Raw mode is useful for:
 
 ## `ouroboros.json`
 
-The `ouroboros.json` file is the heart of your project. It defines the programs, shared maps, and other settings.
+The `ouroboros.json` file is the heart of your project. It defines the programs, map name for program and other settings.
 
 ```json
 {
@@ -156,17 +156,15 @@ This makes it easy to tail call other programs without having to hardcode progra
 By default if you are using `ouroboros build` command to build, you can include this file in your C code like this:  
 ```c
 #include "_ouroboros/programs.h"
-```  
-
-## Generated "Shared Maps" Header
-`ouroboros` also generates a header file at `src/_ouroboros/maps.h` with definitions for your shared maps.  
-This is automatically machine generated and can be imported via `src/_ouroboros/maps.h` in your C code, so you don't need to keep track of which maps are available by looking at `/sys/fs/bpf/` or `bpftool` output.
+```
 
 ## Map Operations
 
+When you build your programs via `ouroboros build`, `ouroboros` will automatically parse the programs defined in `ouroboros.json` and parse BTF (BPF Type Format). and finds out maps you defined in the program
+
 ### Map Discovery and Listing
 
-The `ouroboros map list` command analyzes compiled eBPF programs and lists all discovered maps in bpftool-compatible format:
+The `ouroboros map list` command analyzes compiled eBPF programs and lists all discovered maps in bpftool-compatible format, but only lists map are used by the programs defined in your system
 
 ```bash
 ouroboros map list
@@ -174,11 +172,11 @@ ouroboros map list
 
 Example output (matches `bpftool map` format):
 ```
-20: prog_array  name hs_programs  flags 0x0
+20: prog_array  name ouro_programs  flags 0x0
     key 4B  value 4B  max_entries 65535  memlock 524544B
-21: hash  name global_bucket_s  flags 0x0
+21: hash  name ipv4_hash  flags 0x0
     key 16B  value 8B  max_entries 10000000  memlock 988438528B
-23: ringbuf  name global_session_  flags 0x0
+23: ringbuf  name global_session_log  flags 0x0
     key 0B  value 0B  max_entries 4096  memlock 16680B
 ```
 

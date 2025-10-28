@@ -15,7 +15,7 @@ Running a single eBPF program is straightforward. But what if you need to run ma
 - **Create** program maps for centralized tail call management and easy chaining in your C code.
 - **Machine Generated** constants for program IDs and jump targets, so you don't have to manually manage them.
 - **Chain** them together using eBPF tail calls with generated `JUMP_TO_PROGRAM` and `PROG_*` constants, easily implement tailing to next program.
-- **Build and load** everything with simple commands, without all the `bpftool` hassle.
+- **Build and load** everything with simple commands, without finding pinned path when you use `bpftool` directly.
 
 ## Installation
 
