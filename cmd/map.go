@@ -619,6 +619,7 @@ func sanitizeMermaidID(s string) string {
 	return s
 }
 
+// migrate code from ebpf-caseoh, internal ringbuf piping tool
 var mapLogCmd = &cobra.Command{
 	Use:   "log MAP_NAME",
 	Short: "Read and print ringbuf events from a map",
