@@ -212,7 +212,7 @@ ouroboros map flow test_sessions     # Specific map
 ```bash
 ouroboros map log json_ringbuf              # Print raw bytes to stdout
 ouroboros map log json_ringbuf | jq .       # Parse as JSON
-ouroboros map log json_ringbuf > events.log # Save to file
+ouroboros map log json_ringbufODING  > events.log # Save to file
 ```
 
 ### Map Manipulation (bpftool pass-through)
