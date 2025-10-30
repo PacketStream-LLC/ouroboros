@@ -35,10 +35,12 @@ WARNING: This feature is experimental and may not work correctly in all cases.`,
 			utils.DetectLibBPF()
 		}
 
-		ouroborosConfig, err := config.ReadConfig()
-		if err != nil {
-			logger.Fatal("Failed to read config", "error", err)
-		}
+		// Execute in project root context
+		if err := utils.WithProjectRoot(func() error {
+			ouroborosConfig, err := config.ReadConfig()
+			if err != nil {
+				return fmt.Errorf("failed to read config: %w", err)
+			}
 
 		var srcProg *config.Program
 		var targetProg *config.Program
@@ -106,6 +108,10 @@ WARNING: This feature is experimental and may not work correctly in all cases.`,
 		}
 
 		logger.Info("Merged object created", "output", mergedObjectPath)
+			return nil
+		}); err != nil {
+			logger.Fatal("Failed to execute merge", "error", err)
+		}
 	},
 }
 
@@ -468,7 +474,7 @@ func linkObjects(objectPaths []string, outputPath string) {
 		fmt.Printf("  Compiling %s to LLVM IR...\n", progName)
 
 		// Compile to LLVM IR with -S -emit-llvm
-		args := []string{"-O2", "-g", "-target", "bpf", "-S", "-emit-llvm", mainC, "-o", outputLL, "-Isrc/"}
+		args := []string{"-O2", "-g", "-target", "bpf", "-S", "-emit-llvm", mainC, "-o", outputLL, "-I" + constants.SrcDir + "/"}
 		args = append(args, cfg.CompileArgs...)
 
 		clangCmd := exec.Command("clang", args...)

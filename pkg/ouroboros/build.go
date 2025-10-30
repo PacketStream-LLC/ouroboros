@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+
+	"github.com/PacketStream-LLC/ouroboros/pkg/constants"
 )
 
 // BuildOptions contains options for building eBPF programs.
@@ -51,7 +53,7 @@ func (o *Ouroboros) BuildProgram(progName string, opts *BuildOptions) error {
 		"-target", "bpf",
 		"-c", mainC,
 		"-o", outputObj,
-		"-Isrc/",
+		"-I" + constants.SrcDir + "/",
 	}
 
 	// Add config compile args
@@ -198,7 +200,7 @@ func (o *Ouroboros) CompileToLLVMIR(progName string, opts *BuildOptions) error {
 		"-S", "-emit-llvm", // Generate LLVM IR
 		mainC,
 		"-o", outputLL,
-		"-Isrc/",
+		"-I" + constants.SrcDir + "/",
 	}
 
 	args = append(args, o.GetCompileArgs()...)
