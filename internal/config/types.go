@@ -24,11 +24,12 @@ type ProgramMetadata struct {
 }
 
 type OuroborosConfig struct {
-	Programs      []Program `json:"programs"`
-	CompileArgs   []string  `json:"compile_args"`
-	ProgramMap    string    `json:"program_map,omitempty"`
-	ProgramPrefix string    `json:"program_prefix,omitempty"`
-	BpfBaseDir    string    `json:"bpf_base_dir,omitempty"`
+	Programs             []Program `json:"programs"`
+	CompileArgs          []string  `json:"compile_args"`
+	ProgramMap           string    `json:"program_map,omitempty"`
+	ProgramMapMaxEntries uint32    `json:"program_map_max_entries,omitempty"`
+	ProgramPrefix        string    `json:"program_prefix,omitempty"`
+	BpfBaseDir           string    `json:"bpf_base_dir,omitempty"`
 	//SharedMaps    []SharedMapConfig `json:"shared_maps,omitempty"`
 }
 
@@ -55,6 +56,14 @@ func (c *OuroborosConfig) GetBpfBaseDir() string {
 	}
 
 	return c.BpfBaseDir
+}
+
+func (c *OuroborosConfig) GetProgramMapMaxEntries() uint32 {
+	if c.ProgramMapMaxEntries == 0 {
+		return 65535
+	}
+
+	return c.ProgramMapMaxEntries
 }
 
 func (c *OuroborosConfig) GetMapOptions() ebpf.MapOptions {

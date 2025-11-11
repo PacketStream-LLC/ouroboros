@@ -3,6 +3,7 @@ package cli
 import (
 	"github.com/PacketStream-LLC/ouroboros/internal/logger"
 	"github.com/PacketStream-LLC/ouroboros/internal/utils"
+	sdk "github.com/PacketStream-LLC/ouroboros/pkg/ouroboros"
 
 	"github.com/spf13/cobra"
 )
@@ -17,8 +18,14 @@ var loadCmd = &cobra.Command{
 		// Check if verbose flag is set
 		verbose := utils.IsVerbose(cmd)
 
+		// Check if recreate-progmaps flag is set
+		recreateProgmaps, _ := cmd.Flags().GetBool("recreate-progmaps")
+
 		// Load all programs using SDK
-		loaded, errors := o.SDK().LoadAllPrograms(nil)
+		opts := &sdk.LoadOptions{
+			RecreateProgramMap: recreateProgmaps,
+		}
+		loaded, errors := o.SDK().LoadAllPrograms(opts)
 
 		// Report results
 		for name := range loaded {
@@ -43,4 +50,8 @@ var loadCmd = &cobra.Command{
 
 		logger.Info("Load complete", "loaded_count", len(loaded))
 	},
+}
+
+func init() {
+	loadCmd.Flags().Bool("recreate-progmaps", false, "Automatically recreate program maps if incompatible")
 }

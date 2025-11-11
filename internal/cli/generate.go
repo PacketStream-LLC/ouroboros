@@ -64,7 +64,7 @@ var generateCmd = &cobra.Command{
 	},
 }
 
-func GenerateProgramsHeader(config *config.OuroborosConfig) error {
+func GenerateProgramsHeader(cfg *config.OuroborosConfig) error {
 	globalDir := constants.OuroborosGlobalDir
 
 	if err := os.MkdirAll(globalDir, 0755); err != nil {
@@ -83,7 +83,20 @@ func GenerateProgramsHeader(config *config.OuroborosConfig) error {
 		return fmt.Errorf("failed to parse template: %w", err)
 	}
 
-	if err := tmpl.Execute(file, config); err != nil {
+	// Prepare template data with computed values
+	type templateDataType struct {
+		Programs             []config.Program
+		ProgramMap           string
+		ProgramMapMaxEntries uint32
+	}
+
+	templateData := templateDataType{
+		Programs:             cfg.Programs,
+		ProgramMap:           cfg.GetProgramMap(),
+		ProgramMapMaxEntries: cfg.GetProgramMapMaxEntries(),
+	}
+
+	if err := tmpl.Execute(file, templateData); err != nil {
 		return fmt.Errorf("failed to execute template: %w", err)
 	}
 

@@ -8,7 +8,7 @@
 #include <bpf/bpf_helpers.h>
 
 #define PROG_MAP_NAME {{.ProgramMap}}
-#define PROG_MAX_ENTRIES 65535
+#define PROG_MAX_ENTRIES {{.ProgramMapMaxEntries}}
 
 struct {
     __uint(type, BPF_MAP_TYPE_PROG_ARRAY);

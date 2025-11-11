@@ -2,6 +2,7 @@ package ouroboros
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/PacketStream-LLC/ouroboros/internal/logger"
@@ -22,6 +23,8 @@ type LoadOptions struct {
 	PinPath string
 	// ReplaceMaps allows replacing existing pinned maps
 	ReplaceMaps bool
+	// RecreateProgramMap automatically recreates program maps if incompatible
+	RecreateProgramMap bool
 }
 
 // LoadProgram loads a single eBPF program into the kernel.
@@ -148,23 +151,45 @@ func (o *Ouroboros) GetLoadedProgram(progName string) (*ebpf.Program, error) {
 }
 
 // LoadProgramMap loads or creates the program array map used for tail calls.
-func (o *Ouroboros) LoadProgramMap() (*ebpf.Map, error) {
+func (o *Ouroboros) LoadProgramMap(recreate bool) (*ebpf.Map, error) {
 	mapName := o.GetProgramMap()
 	mapPath := filepath.Join(o.GetBpfBaseDir(), mapName)
+
+	// Get max entries from config (defaults to 65535)
+	maxProgramEntries := o.config.GetProgramMapMaxEntries()
 
 	// Try to load existing map
 	progMap, err := ebpf.LoadPinnedMap(mapPath, nil)
 	if err == nil {
-		return progMap, nil
+		// Check if the pinned map has compatible MaxEntries
+		if progMap.MaxEntries() != maxProgramEntries {
+			if recreate {
+				// Incompatible map, close and unpin it
+				logger.Info("Detected incompatible program map, recreating with correct size",
+					"old_max_entries", progMap.MaxEntries(),
+					"new_max_entries", maxProgramEntries)
+				progMap.Close()
+				if err := os.Remove(mapPath); err != nil && !os.IsNotExist(err) {
+					return nil, fmt.Errorf("failed to unpin incompatible program map: %w", err)
+				}
+				// Continue to create new map with correct size
+			} else {
+				// Return error if not recreating
+				progMap.Close()
+				return nil, fmt.Errorf("program map has incompatible MaxEntries (%d != %d). Use --recreate-progmaps to automatically fix this",
+					progMap.MaxEntries(), maxProgramEntries)
+			}
+		} else {
+			return progMap, nil
+		}
 	}
 
 	// Create new program array map
-	maxPrograms := uint32(len(o.ListPrograms()) + 10) // Add some headroom
 	progMap, err = ebpf.NewMap(&ebpf.MapSpec{
 		Type:       ebpf.ProgramArray,
 		KeySize:    4,
 		ValueSize:  4,
-		MaxEntries: maxPrograms,
+		MaxEntries: maxProgramEntries,
 		Name:       mapName,
 	})
 	if err != nil {
@@ -200,8 +225,12 @@ func (o *Ouroboros) LoadAllPrograms(opts *LoadOptions) (map[string]*LoadedProgra
 	loaded := make(map[string]*LoadedProgram)
 	errors := make(map[string]error)
 
+	if opts == nil {
+		opts = &LoadOptions{}
+	}
+
 	// Load program map first
-	progMap, err := o.LoadProgramMap()
+	progMap, err := o.LoadProgramMap(opts.RecreateProgramMap)
 	if err != nil {
 		// Store error for all programs
 		for _, p := range programs {
