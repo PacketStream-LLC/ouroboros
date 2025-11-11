@@ -37,7 +37,7 @@ This includes map type, key size, value size, and max entries.
 Matches bpftool map list output format.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		// Get verbose from root flags
-		verbose, _ := cmd.Root().PersistentFlags().GetBool("verbose")
+		verbose := utils.IsVerbose(cmd)
 
 		// Get Ouroboros instance
 		o := MustGetOuroboros(cmd)

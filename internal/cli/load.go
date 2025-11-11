@@ -2,6 +2,7 @@ package cli
 
 import (
 	"github.com/PacketStream-LLC/ouroboros/internal/logger"
+	"github.com/PacketStream-LLC/ouroboros/internal/utils"
 
 	"github.com/spf13/cobra"
 )
@@ -14,7 +15,7 @@ var loadCmd = &cobra.Command{
 		o := MustGetOuroboros(cmd)
 
 		// Check if verbose flag is set
-		verbose, _ := cmd.Flags().GetBool("verbose")
+		verbose := utils.IsVerbose(cmd)
 
 		// Load all programs using SDK
 		loaded, errors := o.SDK().LoadAllPrograms(nil)
