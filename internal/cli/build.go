@@ -2,9 +2,12 @@ package cli
 
 import (
 	"os"
+	"path/filepath"
 
+	"github.com/PacketStream-LLC/ouroboros/internal/config"
 	"github.com/PacketStream-LLC/ouroboros/internal/logger"
 	"github.com/PacketStream-LLC/ouroboros/internal/utils"
+	"github.com/PacketStream-LLC/ouroboros/pkg/constants"
 	sdk "github.com/PacketStream-LLC/ouroboros/pkg/ouroboros"
 
 	"github.com/spf13/cobra"
@@ -22,6 +25,23 @@ var buildCmd = &cobra.Command{
 
 		// Execute in project root context
 		if err := utils.WithProjectRoot(func() error {
+			// Check if _ouroboros directory exists, generate if not
+			ouroborosDir := filepath.Join(constants.SrcDir, "_ouroboros")
+			if _, err := os.Stat(ouroborosDir); os.IsNotExist(err) {
+				logger.Info("_ouroboros directory not found, running generate first")
+
+				ouroborosConfig, err := config.ReadConfig()
+				if err != nil {
+					logger.Fatal("Failed to read config", "error", err)
+				}
+
+				if err := GenerateProgramsHeader(ouroborosConfig); err != nil {
+					logger.Fatal("Failed to generate programs header", "error", err)
+				}
+
+				logger.Info("Generated _ouroboros files successfully")
+			}
+
 			// Get Ouroboros instance
 			o := MustGetOuroboros(cmd)
 
