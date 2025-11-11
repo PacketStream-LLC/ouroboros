@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/PacketStream-LLC/ouroboros/internal/logger"
 	"github.com/cilium/ebpf"
 )
 
@@ -27,6 +28,8 @@ type LoadOptions struct {
 // It loads the compiled object file, pins it to the BPF filesystem,
 // and returns a handle to the loaded program.
 func (o *Ouroboros) LoadProgram(progName string, opts *LoadOptions) (*LoadedProgram, error) {
+	logger.Debug("Loading program", "name", progName)
+
 	if opts == nil {
 		opts = &LoadOptions{
 			PinPath: o.GetBpfBaseDir(),
@@ -35,28 +38,35 @@ func (o *Ouroboros) LoadProgram(progName string, opts *LoadOptions) (*LoadedProg
 
 	prog := o.GetProgram(progName)
 	if prog == nil {
+		logger.Debug("Program not found in config", "name", progName)
 		return nil, fmt.Errorf("program %s not found in config", progName)
 	}
 
 	// Check if object file exists
 	objPath := o.GetProgramObjectPath(progName)
+	logger.Debug("Checking object file", "name", progName, "path", objPath)
 	if !o.IsProgramBuilt(progName) {
+		logger.Debug("Object file not found", "name", progName, "path", objPath)
 		return nil, fmt.Errorf("program %s not built (missing %s)", progName, objPath)
 	}
 
 	// Load the collection
+	logger.Debug("Loading collection spec", "name", progName, "path", objPath)
 	spec, err := ebpf.LoadCollectionSpec(objPath)
 	if err != nil {
+		logger.Debug("Failed to load collection spec", "name", progName, "error", err)
 		return nil, fmt.Errorf("failed to load collection spec: %w", err)
 	}
 
 	// Load collection with pin options
+	logger.Debug("Loading collection into kernel", "name", progName, "pin_path", opts.PinPath)
 	coll, err := ebpf.NewCollectionWithOptions(spec, ebpf.CollectionOptions{
 		Maps: ebpf.MapOptions{
 			PinPath: opts.PinPath,
 		},
 	})
 	if err != nil {
+		logger.Debug("Failed to load collection into kernel", "name", progName, "error", err)
 		return nil, fmt.Errorf("failed to load collection: %w", err)
 	}
 
@@ -69,9 +79,11 @@ func (o *Ouroboros) LoadProgram(progName string, opts *LoadOptions) (*LoadedProg
 
 	if loadedProg == nil {
 		coll.Close()
+		logger.Debug("No programs found in collection", "name", progName, "path", objPath)
 		return nil, fmt.Errorf("no programs found in %s", objPath)
 	}
 
+	logger.Debug("Successfully loaded program", "name", progName, "id", prog.ID)
 	return &LoadedProgram{
 		Name:       progName,
 		ID:         prog.ID,

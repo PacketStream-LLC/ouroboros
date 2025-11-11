@@ -13,6 +13,9 @@ var loadCmd = &cobra.Command{
 		// Get Ouroboros instance
 		o := MustGetOuroboros(cmd)
 
+		// Check if verbose flag is set
+		verbose, _ := cmd.Flags().GetBool("verbose")
+
 		// Load all programs using SDK
 		loaded, errors := o.SDK().LoadAllPrograms(nil)
 
@@ -26,7 +29,14 @@ var loadCmd = &cobra.Command{
 			}
 		}
 
+		// If there are errors and verbose is enabled, print detailed error information
 		if len(errors) > 0 {
+			if verbose {
+				logger.Error("Detailed error information:")
+				for name, err := range errors {
+					logger.Error("  Program failed", "name", name, "error", err)
+				}
+			}
 			logger.Fatal("Failed to load some programs", "failed_count", len(errors))
 		}
 
