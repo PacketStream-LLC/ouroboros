@@ -226,7 +226,11 @@ func (o *Ouroboros) LoadAllPrograms(opts *LoadOptions) (map[string]*LoadedProgra
 	errors := make(map[string]error)
 
 	if opts == nil {
-		opts = &LoadOptions{}
+		opts = &LoadOptions{
+			PinPath: o.GetBpfBaseDir(),
+		}
+	} else if opts.PinPath == "" {
+		opts.PinPath = o.GetBpfBaseDir()
 	}
 
 	// Load program map first
