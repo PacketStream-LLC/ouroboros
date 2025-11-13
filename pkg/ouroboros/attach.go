@@ -3,6 +3,8 @@ package ouroboros
 import (
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 
 	"github.com/cilium/ebpf/link"
 )
@@ -76,6 +78,13 @@ func (o *Ouroboros) AttachToInterface(loaded *LoadedProgram, ifaceName string, o
 		return nil, fmt.Errorf("failed to attach to %s: %w", ifaceName, err)
 	}
 
+	// Pin the link to persist it beyond process lifetime
+	linkPath := filepath.Join(o.GetBpfBaseDir(), fmt.Sprintf("link_%s", ifaceName))
+	if err := l.Pin(linkPath); err != nil {
+		l.Close()
+		return nil, fmt.Errorf("failed to pin link: %w", err)
+	}
+
 	return &AttachedProgram{
 		Program:   loaded,
 		Interface: ifaceName,
@@ -89,48 +98,80 @@ func (o *Ouroboros) DetachFromInterface(attached *AttachedProgram) error {
 		return fmt.Errorf("invalid attached program")
 	}
 
-	return attached.Link.Close()
+	// Unpin the link first
+	linkPath := filepath.Join(o.GetBpfBaseDir(), fmt.Sprintf("link_%s", attached.Interface))
+	if err := attached.Link.Unpin(); err != nil {
+		// Continue with close even if unpin fails
+		_ = attached.Link.Close()
+		return fmt.Errorf("failed to unpin link: %w", err)
+	}
+
+	// Close the link to detach from interface
+	if err := attached.Link.Close(); err != nil {
+		return fmt.Errorf("failed to close link: %w", err)
+	}
+
+	// Remove the pinned file if it still exists
+	_ = os.Remove(linkPath)
+
+	return nil
 }
 
 // DetachByName detaches a program from an interface by name.
 // This is useful when you don't have the AttachedProgram handle.
+// This method loads the pinned link and uses it to detach.
 func (o *Ouroboros) DetachByName(ifaceName string) error {
-	iface, err := net.InterfaceByName(ifaceName)
+	_, err := net.InterfaceByName(ifaceName)
 	if err != nil {
 		return fmt.Errorf("interface %s not found: %w", ifaceName, err)
 	}
 
-	// Attach with nil program to detach
-	l, err := link.AttachXDP(link.XDPOptions{
-		Program:   nil,
-		Interface: iface.Index,
-	})
+	// Load the pinned link
+	linkPath := filepath.Join(o.GetBpfBaseDir(), fmt.Sprintf("link_%s", ifaceName))
+	if _, err := os.Stat(linkPath); os.IsNotExist(err) {
+		return fmt.Errorf("no pinned link found for interface %s", ifaceName)
+	}
+
+	l, err := link.LoadPinnedLink(linkPath, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to load pinned link: %w", err)
 	}
-	if l != nil {
-		return l.Close()
+
+	// Unpin and close
+	if err := l.Unpin(); err != nil {
+		_ = l.Close()
+		return fmt.Errorf("failed to unpin link: %w", err)
 	}
+
+	if err := l.Close(); err != nil {
+		return fmt.Errorf("failed to close link: %w", err)
+	}
+
+	// Clean up the pinned file
+	_ = os.Remove(linkPath)
+
 	return nil
 }
 
 // IsAttached checks if any XDP program is attached to an interface.
-// Note: This is a simplified implementation that attempts to attach a nil program.
-// A more robust implementation would require kernel support for querying attached programs.
+// This checks for a pinned link in the BPF filesystem.
 func (o *Ouroboros) IsAttached(ifaceName string) (bool, error) {
-	iface, err := net.InterfaceByName(ifaceName)
+	_, err := net.InterfaceByName(ifaceName)
 	if err != nil {
 		return false, fmt.Errorf("interface %s not found: %w", ifaceName, err)
 	}
 
-	// Try to attach with replace flag - if there's a program, it will fail
-	_, err = link.AttachXDP(link.XDPOptions{
-		Interface: iface.Index,
-		Flags:     link.XDPDriverMode,
-	})
+	// Check if a pinned link exists for this interface
+	linkPath := filepath.Join(o.GetBpfBaseDir(), fmt.Sprintf("link_%s", ifaceName))
+	_, err = os.Stat(linkPath)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check link: %w", err)
+	}
 
-	// If attach fails, there might be an existing program
-	return err != nil, nil
+	return true, nil
 }
 
 // GetAttachedProgramID returns the ID of the program attached to an interface.
