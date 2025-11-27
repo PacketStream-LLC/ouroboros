@@ -45,6 +45,9 @@ func init() {
 	// Add global behavior flags
 	RootCmd.PersistentFlags().Bool("ignore-libbpf-detection", false, "Skip libbpf-dev detection check")
 
+	// Add global config flag
+	RootCmd.PersistentFlags().StringP("config", "c", "", "Path to ouroboros.json config file or project directory")
+
 	// Register all subcommands
 	RootCmd.AddCommand(
 		addCmd,

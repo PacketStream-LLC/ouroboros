@@ -16,14 +16,14 @@ type MapInfo struct {
 	KeySize    uint32
 	ValueSize  uint32
 	MaxEntries uint32
-	Programs   []string // Programs that use this map
+	DependsBy  []string // DependsBy that use this map
 	ID         uint32   // Kernel ID if loaded
 	Pinned     bool     // Whether the map is pinned
 }
 
-// ListMaps discovers all maps from compiled programs.
+// ListMapInfos discovers all maps from compiled programs.
 // It analyzes the object files to extract map specifications.
-func (o *Ouroboros) ListMaps() (map[string]*MapInfo, error) {
+func (o *Ouroboros) ListMapInfos() (map[string]*MapInfo, error) {
 	allMaps := make(map[string]*MapInfo)
 
 	programs := o.ListPrograms()
@@ -46,7 +46,7 @@ func (o *Ouroboros) ListMaps() (map[string]*MapInfo, error) {
 		for mapName, mapSpec := range collSpec.Maps {
 			if existing, ok := allMaps[mapName]; ok {
 				// Map already exists, add this program to the list
-				existing.Programs = append(existing.Programs, prog.Name)
+				existing.DependsBy = append(existing.DependsBy, prog.Name)
 			} else {
 				// New map discovered
 				allMaps[mapName] = &MapInfo{
@@ -55,7 +55,7 @@ func (o *Ouroboros) ListMaps() (map[string]*MapInfo, error) {
 					KeySize:    mapSpec.KeySize,
 					ValueSize:  mapSpec.ValueSize,
 					MaxEntries: mapSpec.MaxEntries,
-					Programs:   []string{prog.Name},
+					DependsBy:  []string{prog.Name},
 				}
 			}
 		}
@@ -78,9 +78,13 @@ func (o *Ouroboros) ListMaps() (map[string]*MapInfo, error) {
 	return allMaps, nil
 }
 
-// GetMap returns information about a specific map by name.
-func (o *Ouroboros) GetMap(mapName string) (*MapInfo, error) {
-	maps, err := o.ListMaps()
+func (o *Ouroboros) GetMap(mapName string) (*ebpf.Map, error) {
+	return ebpf.LoadPinnedMap(filepath.Join(o.GetBpfBaseDir(), mapName), nil)
+}
+
+// GetMapInfo returns information about a specific map by name.
+func (o *Ouroboros) GetMapInfo(mapName string) (*MapInfo, error) {
+	maps, err := o.ListMapInfos()
 	if err != nil {
 		return nil, err
 	}
@@ -93,8 +97,8 @@ func (o *Ouroboros) GetMap(mapName string) (*MapInfo, error) {
 	return mapInfo, nil
 }
 
-// GetMapsByProgram returns all maps used by a specific program.
-func (o *Ouroboros) GetMapsByProgram(progName string) (map[string]*MapInfo, error) {
+// GetMapInfosByProgram returns all maps used by a specific program.
+func (o *Ouroboros) GetMapInfosByProgram(progName string) (map[string]*MapInfo, error) {
 	objPath := o.GetProgramObjectPath(progName)
 
 	if !o.IsProgramBuilt(progName) {
@@ -114,7 +118,7 @@ func (o *Ouroboros) GetMapsByProgram(progName string) (map[string]*MapInfo, erro
 			KeySize:    mapSpec.KeySize,
 			ValueSize:  mapSpec.ValueSize,
 			MaxEntries: mapSpec.MaxEntries,
-			Programs:   []string{progName},
+			DependsBy:  []string{progName},
 		}
 	}
 
@@ -123,12 +127,12 @@ func (o *Ouroboros) GetMapsByProgram(progName string) (map[string]*MapInfo, erro
 
 // GetProgramsByMap returns all programs that use a specific map.
 func (o *Ouroboros) GetProgramsByMap(mapName string) ([]string, error) {
-	mapInfo, err := o.GetMap(mapName)
+	mapInfo, err := o.GetMapInfo(mapName)
 	if err != nil {
 		return nil, err
 	}
 
-	return mapInfo.Programs, nil
+	return mapInfo.DependsBy, nil
 }
 
 // LoadPinnedMap loads a pinned map by name and returns the handle.
@@ -203,7 +207,7 @@ type MapAnalysis struct {
 
 // AnalyzeMaps performs comprehensive analysis of all maps.
 func (o *Ouroboros) AnalyzeMaps() (*MapAnalysis, error) {
-	maps, err := o.ListMaps()
+	maps, err := o.ListMapInfos()
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +222,7 @@ func (o *Ouroboros) AnalyzeMaps() (*MapAnalysis, error) {
 
 	for name, mapInfo := range maps {
 		// Classify by sharing
-		if len(mapInfo.Programs) > 1 {
+		if len(mapInfo.DependsBy) > 1 {
 			analysis.SharedMaps = append(analysis.SharedMaps, name)
 		} else {
 			analysis.UniqueMaps = append(analysis.UniqueMaps, name)
@@ -228,7 +232,7 @@ func (o *Ouroboros) AnalyzeMaps() (*MapAnalysis, error) {
 		analysis.MapsByType[mapInfo.Type] = append(analysis.MapsByType[mapInfo.Type], name)
 
 		// Record dependencies
-		analysis.Dependencies[name] = mapInfo.Programs
+		analysis.Dependencies[name] = mapInfo.DependsBy
 	}
 
 	// Sort for consistent output

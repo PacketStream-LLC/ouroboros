@@ -35,8 +35,20 @@ WARNING: This feature is experimental and may not work correctly in all cases.`,
 			utils.DetectLibBPF()
 		}
 
+		// Get Ouroboros instance first (respects --config flag)
+		o := MustGetOuroboros(cmd)
+		if o == nil {
+			logger.Fatal("Failed to initialize ouroboros - config not found")
+		}
+
+		// Get project root from the config-aware instance
+		projectRoot, err := o.SDK().GetProjectRoot()
+		if err != nil {
+			logger.Fatal("Failed to get project root", "error", err)
+		}
+
 		// Execute in project root context
-		if err := utils.WithProjectRoot(func() error {
+		if err := utils.WithProjectRootPath(projectRoot, func() error {
 			ouroborosConfig, err := config.ReadConfig()
 			if err != nil {
 				return fmt.Errorf("failed to read config: %w", err)

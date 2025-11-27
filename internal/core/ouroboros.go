@@ -23,6 +23,16 @@ func New() (*Ouroboros, error) {
 	return &Ouroboros{sdk: s}, nil
 }
 
+// NewFromPath creates a new Ouroboros instance from a specific config path
+func NewFromPath(path string) (*Ouroboros, error) {
+	s, err := sdk.NewFromPath(path)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Ouroboros{sdk: s}, nil
+}
+
 // NewWithConfig creates a new Ouroboros instance with the provided configuration
 func NewWithConfig(cfg *config.OuroborosConfig) *Ouroboros {
 	// Convert internal config to SDK config

@@ -23,8 +23,20 @@ var buildCmd = &cobra.Command{
 			utils.DetectLibBPF()
 		}
 
+		// Get Ouroboros instance first (respects --config flag)
+		o := MustGetOuroboros(cmd)
+		if o == nil {
+			logger.Fatal("Failed to initialize ouroboros - config not found")
+		}
+
+		// Get project root from the config-aware instance
+		projectRoot, err := o.SDK().GetProjectRoot()
+		if err != nil {
+			logger.Fatal("Failed to get project root", "error", err)
+		}
+
 		// Execute in project root context
-		if err := utils.WithProjectRoot(func() error {
+		if err := utils.WithProjectRootPath(projectRoot, func() error {
 			// Check if _ouroboros directory exists, generate if not
 			ouroborosDir := filepath.Join(constants.SrcDir, "_ouroboros")
 			if _, err := os.Stat(ouroborosDir); os.IsNotExist(err) {
@@ -41,9 +53,6 @@ var buildCmd = &cobra.Command{
 
 				logger.Info("Generated _ouroboros files successfully")
 			}
-
-			// Get Ouroboros instance
-			o := MustGetOuroboros(cmd)
 
 			// CLI shows build output by default (SDK is silent by default)
 			opts := &sdk.BuildOptions{

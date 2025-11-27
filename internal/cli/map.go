@@ -43,7 +43,7 @@ Matches bpftool map list output format.`,
 		o := MustGetOuroboros(cmd)
 
 		// List all maps using SDK
-		allMaps, err := o.SDK().ListMaps()
+		allMaps, err := o.SDK().ListMapInfos()
 		if err != nil {
 			logger.Fatal("Failed to list maps", "error", err)
 		}
@@ -108,7 +108,7 @@ You can specify the map by name or kernel ID.`,
 		o := MustGetOuroboros(cmd)
 
 		// List all maps to search
-		allMaps, err := o.SDK().ListMaps()
+		allMaps, err := o.SDK().ListMapInfos()
 		if err != nil {
 			logger.Fatal("Failed to list maps", "error", err)
 		}
@@ -169,8 +169,8 @@ func printMapInfoBpftool(info *sdk.MapInfo, verbose bool) {
 		memlock)
 
 	// Additional lines for program info if verbose
-	if verbose && len(info.Programs) > 0 {
-		fmt.Printf("    pids %s\n", strings.Join(info.Programs, ","))
+	if verbose && len(info.DependsBy) > 0 {
+		fmt.Printf("    pids %s\n", strings.Join(info.DependsBy, ","))
 	}
 }
 
@@ -196,11 +196,11 @@ func printMapInfoDetailed(o *core.Ouroboros, info *sdk.MapInfo) {
 		fmt.Printf("\tpinned %s\n", pinPath)
 	}
 
-	if len(info.Programs) > 0 {
-		fmt.Printf("\tprograms: %s\n", strings.Join(info.Programs, ", "))
+	if len(info.DependsBy) > 0 {
+		fmt.Printf("\tprograms: %s\n", strings.Join(info.DependsBy, ", "))
 	}
 
-	if len(info.Programs) > 1 || strings.HasPrefix(info.Name, "shared_") {
+	if len(info.DependsBy) > 1 || strings.HasPrefix(info.Name, "shared_") {
 		fmt.Printf("\tshared: yes\n")
 	}
 
@@ -225,13 +225,22 @@ Otherwise, shows all maps and their program dependencies.`,
 			logger.Fatal("Failed to resolve output file path", "error", err)
 		}
 
-		// Execute in project root context
-		if err := utils.WithProjectRoot(func() error {
-			// Get Ouroboros instance
-			o := MustGetOuroboros(cmd)
+		// Get Ouroboros instance first (respects --config flag)
+		o := MustGetOuroboros(cmd)
+		if o == nil {
+			logger.Fatal("Failed to initialize ouroboros - config not found")
+		}
 
+		// Get project root from the config-aware instance
+		projectRoot, err := o.SDK().GetProjectRoot()
+		if err != nil {
+			logger.Fatal("Failed to get project root", "error", err)
+		}
+
+		// Execute in project root context
+		if err := utils.WithProjectRootPath(projectRoot, func() error {
 			// Discover all maps using SDK
-			allMaps, err := o.SDK().ListMaps()
+			allMaps, err := o.SDK().ListMapInfos()
 			if err != nil {
 				return fmt.Errorf("failed to list maps: %w", err)
 			}
@@ -300,7 +309,7 @@ func generateMapFlowMermaid(maps map[string]*sdk.MapInfo) string {
 		sb.WriteString(fmt.Sprintf("  style %s fill:#f9f,stroke:#333,stroke-width:2px\n", mapNodeID))
 
 		// Create edges from programs to map
-		for _, progName := range mapInfo.Programs {
+		for _, progName := range mapInfo.DependsBy {
 			progNodeID := fmt.Sprintf("prog_%s", sanitizeMermaidID(progName))
 			sb.WriteString(fmt.Sprintf("  %s[\"%s\"] --> %s\n",
 				progNodeID,

@@ -37,8 +37,20 @@ var flowCmd = &cobra.Command{
 			logger.Fatal("Failed to resolve output file path", "error", err)
 		}
 
+		// Get Ouroboros instance first (respects --config flag)
+		o := MustGetOuroboros(cmd)
+		if o == nil {
+			logger.Fatal("Failed to initialize ouroboros - config not found")
+		}
+
+		// Get project root from the config-aware instance
+		projectRoot, err := o.SDK().GetProjectRoot()
+		if err != nil {
+			logger.Fatal("Failed to get project root", "error", err)
+		}
+
 		// Execute in project root context
-		if err := utils.WithProjectRoot(func() error {
+		if err := utils.WithProjectRootPath(projectRoot, func() error {
 			ouroborosConfig, err := config.ReadConfig()
 			if err != nil {
 				return fmt.Errorf("failed to read config: %w", err)

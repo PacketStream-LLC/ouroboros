@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/PacketStream-LLC/ouroboros/internal/logger"
 	"github.com/cilium/ebpf/link"
 )
 
@@ -198,33 +199,32 @@ func (o *Ouroboros) ListInterfaces() ([]string, error) {
 }
 
 // AttachMainProgram is a convenience method to attach the main program to an interface.
+// This loads ALL programs in the project (to populate the program map for tail calls)
+// and then attaches the main program to the specified interface.
 func (o *Ouroboros) AttachMainProgram(ifaceName string, opts *AttachOptions) (*AttachedProgram, error) {
 	mainProg := o.GetMainProgram()
 	if mainProg == nil {
 		return nil, fmt.Errorf("no main program configured")
 	}
 
-	// Load the program if not already loaded
-	var loaded *LoadedProgram
-	var err error
+	// Load ALL programs to populate the program map for tail calls
+	// This is necessary because XDP programs may use tail calls to other programs
+	loadedProgs, loadErrors := o.LoadAllPrograms(nil)
 
-	if o.IsProgramLoaded(mainProg.Name) {
-		// Get existing loaded program
-		prog, err := o.GetLoadedProgram(mainProg.Name)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get loaded program: %w", err)
+	// Check if main program loaded successfully
+	loaded, ok := loadedProgs[mainProg.Name]
+	if !ok {
+		if err, hasErr := loadErrors[mainProg.Name]; hasErr {
+			return nil, fmt.Errorf("failed to load main program: %w", err)
 		}
+		return nil, fmt.Errorf("main program %s not loaded", mainProg.Name)
+	}
 
-		loaded = &LoadedProgram{
-			Name:    mainProg.Name,
-			ID:      mainProg.ID,
-			Program: prog,
-		}
-	} else {
-		// Load the program
-		loaded, err = o.LoadProgram(mainProg.Name, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load program: %w", err)
+	// Log any errors loading other programs (non-fatal)
+	for name, err := range loadErrors {
+		if err != nil && name != mainProg.Name {
+			logger.Warn("Failed to load program (tail calls to this program may fail)",
+				"program", name, "error", err)
 		}
 	}
 

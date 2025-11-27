@@ -36,8 +36,8 @@ struct {
     return XDP_PASS;
 
 
-// Programs
-{{range .Programs}}#define PROG_{{.Name}} {{.ID}}
+// DependsBy
+{{range .DependsBy}}#define PROG_{{.Name}} {{.ID}}
 {{end}}
 
 #endif // __PROGRAMS_H

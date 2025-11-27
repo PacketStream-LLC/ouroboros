@@ -89,16 +89,21 @@ func ResolveCwdPath(path string) (string, error) {
 // WithProjectRoot executes a function with the working directory changed to project root
 // Automatically restores the original working directory after execution
 func WithProjectRoot(fn func() error) error {
+	// Find project root from CWD
+	projectRoot, err := config.FindProjectRoot()
+	if err != nil {
+		return err
+	}
+	return WithProjectRootPath(projectRoot, fn)
+}
+
+// WithProjectRootPath executes a function with the working directory changed to specified project root
+// Automatically restores the original working directory after execution
+func WithProjectRootPath(projectRoot string, fn func() error) error {
 	// Save current directory
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %w", err)
-	}
-
-	// Find and change to project root
-	projectRoot, err := config.FindProjectRoot()
-	if err != nil {
-		return err
 	}
 
 	if err := os.Chdir(projectRoot); err != nil {
