@@ -29,6 +29,7 @@
 package ouroboros
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,7 +43,8 @@ import (
 // It encapsulates the project configuration and provides methods for
 // program management, building, loading, and other operations.
 type Ouroboros struct {
-	config *config.OuroborosConfig
+	config      *config.OuroborosConfig
+	projectRoot string // Absolute path to the project root directory
 }
 
 // Program represents an eBPF program in the project.
@@ -77,8 +79,60 @@ func New() (*Ouroboros, error) {
 		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
 
+	// Get and store the project root
+	projectRoot, err := config.FindProjectRoot()
+	if err != nil {
+		return nil, fmt.Errorf("failed to find project root: %w", err)
+	}
+
 	return &Ouroboros{
-		config: cfg,
+		config:      cfg,
+		projectRoot: projectRoot,
+	}, nil
+}
+
+// NewFromPath creates a new Ouroboros SDK instance by loading the configuration
+// from the specified path. The path can be either a directory containing ouroboros.json
+// or the path to the ouroboros.json file itself.
+func NewFromPath(path string) (*Ouroboros, error) {
+	// Make path absolute
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get absolute path: %w", err)
+	}
+
+	// Check if path is a directory or file
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat path: %w", err)
+	}
+
+	var configPath string
+	var projectRoot string
+	if info.IsDir() {
+		projectRoot = absPath
+		configPath = filepath.Join(absPath, "ouroboros.json")
+	} else {
+		projectRoot = filepath.Dir(absPath)
+		configPath = absPath
+	}
+
+	// Read config from the specified path
+	jsonFile, err := os.Open(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open config: %w", err)
+	}
+	defer jsonFile.Close()
+
+	var cfg config.OuroborosConfig
+	decoder := json.NewDecoder(jsonFile)
+	if err := decoder.Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("failed to decode config: %w", err)
+	}
+
+	return &Ouroboros{
+		config:      &cfg,
+		projectRoot: projectRoot,
 	}, nil
 }
 
@@ -87,6 +141,16 @@ func New() (*Ouroboros, error) {
 func NewWithConfig(cfg *Config) *Ouroboros {
 	return &Ouroboros{
 		config: toInternalConfig(cfg),
+	}
+}
+
+// NewWithProjectConfig creates a new Ouroboros SDK instance with the provided configuration,
+// with specified project working directory.
+// This is useful for creating projects programmatically or for testing.
+func NewWithProjectConfig(cfg *Config, workingDir string) *Ouroboros {
+	return &Ouroboros{
+		config:      toInternalConfig(cfg),
+		projectRoot: workingDir,
 	}
 }
 
@@ -112,6 +176,10 @@ func (o *Ouroboros) ReloadConfig() error {
 
 // GetProjectRoot returns the project root directory (where ouroboros.json is located).
 func (o *Ouroboros) GetProjectRoot() (string, error) {
+	if o.projectRoot != "" {
+		return o.projectRoot, nil
+	}
+	// Fallback to searching from CWD for backwards compatibility
 	return config.FindProjectRoot()
 }
 
