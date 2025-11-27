@@ -47,13 +47,11 @@ WARNING: This feature is experimental and may not work correctly in all cases.`,
 			logger.Fatal("Failed to get project root", "error", err)
 		}
 
+		// Get config from the Ouroboros instance
+		ouroborosConfig := o.Config()
+
 		// Execute in project root context
 		if err := utils.WithProjectRootPath(projectRoot, func() error {
-			ouroborosConfig, err := config.ReadConfig()
-			if err != nil {
-				return fmt.Errorf("failed to read config: %w", err)
-			}
-
 		var srcProg *config.Program
 		var targetProg *config.Program
 
@@ -147,7 +145,7 @@ func mergeTwoPrograms(srcProg *config.Program, targetProg *config.Program, cfg *
 	}
 
 	// Link objects together (now handles tail call replacement in IR)
-	linkObjects(objectsToMerge, outputPath)
+	linkObjects(objectsToMerge, outputPath, cfg)
 }
 
 func mergeProgram(prog *config.Program, cfg *config.OuroborosConfig, outputPath string) {
@@ -169,7 +167,7 @@ func mergeProgram(prog *config.Program, cfg *config.OuroborosConfig, outputPath 
 	}
 
 	// Link objects together (now handles tail call replacement in IR)
-	linkObjects(objectsToMerge, outputPath)
+	linkObjects(objectsToMerge, outputPath, cfg)
 }
 
 func collectTailCallTargets(prog *config.Program, cfg *config.OuroborosConfig, visited map[string]bool, objectsToMerge *[]string) {
@@ -453,12 +451,11 @@ func removeSymbolsFromELF(inputPath, outputPath string, symbolsToRemove []string
 	return os.WriteFile(outputPath, data, 0644)
 }
 
-func linkObjects(objectPaths []string, outputPath string) {
+func linkObjects(objectPaths []string, outputPath string, cfg *config.OuroborosConfig) {
 	fmt.Printf("Merging %d programs at LLVM IR level...\n", len(objectPaths))
 
 	// Step 1: Compile each object's source to LLVM IR
 	irPaths := []string{}
-	cfg, _ := config.ReadConfig()
 
 	for _, objPath := range objectPaths {
 		// Get program name from object path (e.g., target/main.o -> main)

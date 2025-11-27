@@ -49,18 +49,16 @@ var flowCmd = &cobra.Command{
 			logger.Fatal("Failed to get project root", "error", err)
 		}
 
+		// Get config from the Ouroboros instance
+		ouroborosConfig := o.Config()
+
+		mainProg := ouroborosConfig.GetMainProgram()
+		if mainProg == nil {
+			logger.Fatal("main program not found in ouroboros.json. Please set 'is_main' to true for one of the programs")
+		}
+
 		// Execute in project root context
 		if err := utils.WithProjectRootPath(projectRoot, func() error {
-			ouroborosConfig, err := config.ReadConfig()
-			if err != nil {
-				return fmt.Errorf("failed to read config: %w", err)
-			}
-
-			mainProg := ouroborosConfig.GetMainProgram()
-			if mainProg == nil {
-				return fmt.Errorf("main program not found in ouroboros.json. Please set 'is_main' to true for one of the programs")
-			}
-
 			logger.Debug("Building programs before flow analysis")
 			buildCmd.Run(cmd, []string{})
 

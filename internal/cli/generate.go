@@ -8,8 +8,9 @@ import (
 	"text/template"
 
 	"github.com/PacketStream-LLC/ouroboros/internal/config"
-	"github.com/PacketStream-LLC/ouroboros/pkg/constants"
 	"github.com/PacketStream-LLC/ouroboros/internal/logger"
+	"github.com/PacketStream-LLC/ouroboros/internal/utils"
+	"github.com/PacketStream-LLC/ouroboros/pkg/constants"
 
 	"github.com/spf13/cobra"
 )
@@ -33,34 +34,49 @@ var generateCmd = &cobra.Command{
 	Use:   "generate",
 	Short: "Generate _ouroboros related files",
 	Run: func(cmd *cobra.Command, args []string) {
+		// Get Ouroboros instance (respects --config flag)
+		o := MustGetOuroboros(cmd)
+		if o == nil {
+			logger.Fatal("Failed to initialize ouroboros - config not found")
+		}
 
-		ouroborosConfig, err := config.ReadConfig()
+		// Get project root from the config-aware instance
+		projectRoot, err := o.SDK().GetProjectRoot()
 		if err != nil {
-			logger.Fatal("Failed to read config", "error", err)
+			logger.Fatal("Failed to get project root", "error", err)
 		}
 
-		logger.Debug("Generating programs header")
-		if err := GenerateProgramsHeader(ouroborosConfig); err != nil {
-			logger.Fatal("Failed to generate programs header", "error", err)
-		}
+		// Get config from the instance
+		ouroborosConfig := o.Config()
 
-		if ide != "" {
-			logger.Debug("Generating IDE configuration", "ide", ide)
-			switch ide {
-			case "vscode":
-				if err := GenerateVSCodeConfig(); err != nil {
-					logger.Fatal("Failed to generate VS Code config", "error", err)
-				}
-			case "intellij":
-				if err := GenerateCLionConfig(); err != nil {
-					logger.Fatal("Failed to generate CLion config", "error", err)
-				}
-			default:
-				logger.Fatal("Unsupported IDE", "ide", ide)
+		// Execute in project root context
+		if err := utils.WithProjectRootPath(projectRoot, func() error {
+			logger.Debug("Generating programs header")
+			if err := GenerateProgramsHeader(ouroborosConfig); err != nil {
+				return fmt.Errorf("failed to generate programs header: %w", err)
 			}
-		}
 
-		logger.Info("Generated _ouroboros files successfully")
+			if ide != "" {
+				logger.Debug("Generating IDE configuration", "ide", ide)
+				switch ide {
+				case "vscode":
+					if err := GenerateVSCodeConfig(); err != nil {
+						return fmt.Errorf("failed to generate VS Code config: %w", err)
+					}
+				case "intellij":
+					if err := GenerateCLionConfig(); err != nil {
+						return fmt.Errorf("failed to generate CLion config: %w", err)
+					}
+				default:
+					return fmt.Errorf("unsupported IDE: %s", ide)
+				}
+			}
+
+			logger.Info("Generated _ouroboros files successfully")
+			return nil
+		}); err != nil {
+			logger.Fatal("Failed to generate", "error", err)
+		}
 	},
 }
 
