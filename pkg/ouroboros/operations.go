@@ -120,13 +120,25 @@ func InitializeProjectWithMap(mainProgName, programMapName string) (*Ouroboros, 
 // CleanBuildArtifacts removes all build artifacts including the target directory
 // and the global ouroboros directory.
 func (o *Ouroboros) CleanBuildArtifacts() error {
+	// Get absolute target directory
+	targetDir, err := o.GetTargetDir()
+	if err != nil {
+		targetDir = constants.TargetDir
+	}
+
 	// Remove target directory
-	if err := os.RemoveAll(constants.TargetDir); err != nil && !os.IsNotExist(err) {
+	if err := os.RemoveAll(targetDir); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove target directory: %w", err)
 	}
 
+	// Get absolute global directory
+	globalDir, err := o.GetOuroborosGlobalDir()
+	if err != nil {
+		globalDir = constants.OuroborosGlobalDir
+	}
+
 	// Remove ouroboros global directory
-	if err := os.RemoveAll("src/_ouroboros"); err != nil && !os.IsNotExist(err) {
+	if err := os.RemoveAll(globalDir); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove ouroboros global directory: %w", err)
 	}
 

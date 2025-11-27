@@ -249,7 +249,12 @@ func (o *Ouroboros) SetCompileArgs(args []string) {
 
 // GetProgramPath returns the filesystem path for a program's source directory.
 func (o *Ouroboros) GetProgramPath(progName string) string {
-	return filepath.Join(constants.SrcDir, progName)
+	root, err := o.GetProjectRoot()
+	if err != nil {
+		// Fallback to relative path if project root can't be determined
+		return filepath.Join(constants.SrcDir, progName)
+	}
+	return filepath.Join(root, constants.SrcDir, progName)
 }
 
 // GetProgramMainFile returns the path to a program's main.c file.
@@ -259,12 +264,22 @@ func (o *Ouroboros) GetProgramMainFile(progName string) string {
 
 // GetProgramObjectPath returns the path to a compiled program object file.
 func (o *Ouroboros) GetProgramObjectPath(progName string) string {
-	return filepath.Join(constants.TargetDir, fmt.Sprintf("%s.o", progName))
+	root, err := o.GetProjectRoot()
+	if err != nil {
+		// Fallback to relative path if project root can't be determined
+		return filepath.Join(constants.TargetDir, fmt.Sprintf("%s.o", progName))
+	}
+	return filepath.Join(root, constants.TargetDir, fmt.Sprintf("%s.o", progName))
 }
 
 // GetProgramLLPath returns the path to a program's LLVM IR file.
 func (o *Ouroboros) GetProgramLLPath(progName string) string {
-	return filepath.Join(constants.TargetDir, fmt.Sprintf("%s.ll", progName))
+	root, err := o.GetProjectRoot()
+	if err != nil {
+		// Fallback to relative path if project root can't be determined
+		return filepath.Join(constants.TargetDir, fmt.Sprintf("%s.ll", progName))
+	}
+	return filepath.Join(root, constants.TargetDir, fmt.Sprintf("%s.ll", progName))
 }
 
 // Directory Operations
@@ -280,7 +295,12 @@ func (o *Ouroboros) EnsureProgramDirectory(progName string) error {
 
 // EnsureTargetDirectory creates the target directory if it doesn't exist.
 func (o *Ouroboros) EnsureTargetDirectory() error {
-	if err := os.MkdirAll(constants.TargetDir, 0755); err != nil {
+	targetDir, err := o.GetTargetDir()
+	if err != nil {
+		// Fallback to relative path
+		targetDir = constants.TargetDir
+	}
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		return fmt.Errorf("failed to create target directory: %w", err)
 	}
 	return nil
@@ -288,7 +308,12 @@ func (o *Ouroboros) EnsureTargetDirectory() error {
 
 // EnsureGlobalDirectory creates the global ouroboros directory if it doesn't exist.
 func (o *Ouroboros) EnsureGlobalDirectory() error {
-	if err := os.MkdirAll(constants.OuroborosGlobalDir, 0755); err != nil {
+	globalDir, err := o.GetOuroborosGlobalDir()
+	if err != nil {
+		// Fallback to relative path
+		globalDir = constants.OuroborosGlobalDir
+	}
+	if err := os.MkdirAll(globalDir, 0755); err != nil {
 		return fmt.Errorf("failed to create global directory: %w", err)
 	}
 	return nil

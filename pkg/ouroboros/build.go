@@ -46,6 +46,12 @@ func (o *Ouroboros) BuildProgram(progName string, opts *BuildOptions) error {
 		return fmt.Errorf("source file not found: %s", mainC)
 	}
 
+	// Get absolute src directory for includes
+	srcDir, err := o.GetSrcDir()
+	if err != nil {
+		srcDir = constants.SrcDir
+	}
+
 	// Build clang arguments
 	args := []string{
 		"-O2",
@@ -53,7 +59,7 @@ func (o *Ouroboros) BuildProgram(progName string, opts *BuildOptions) error {
 		"-target", "bpf",
 		"-c", mainC,
 		"-o", outputObj,
-		"-I" + constants.SrcDir + "/",
+		"-I" + srcDir + "/",
 	}
 
 	// Add config compile args
@@ -192,6 +198,12 @@ func (o *Ouroboros) CompileToLLVMIR(progName string, opts *BuildOptions) error {
 		return fmt.Errorf("source file not found: %s", mainC)
 	}
 
+	// Get absolute src directory for includes
+	srcDir, err := o.GetSrcDir()
+	if err != nil {
+		srcDir = constants.SrcDir
+	}
+
 	// Build clang arguments for LLVM IR
 	args := []string{
 		"-O2",
@@ -200,7 +212,7 @@ func (o *Ouroboros) CompileToLLVMIR(progName string, opts *BuildOptions) error {
 		"-S", "-emit-llvm", // Generate LLVM IR
 		mainC,
 		"-o", outputLL,
-		"-I" + constants.SrcDir + "/",
+		"-I" + srcDir + "/",
 	}
 
 	args = append(args, o.GetCompileArgs()...)
