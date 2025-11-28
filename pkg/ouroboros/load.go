@@ -145,9 +145,25 @@ func (o *Ouroboros) IsProgramLoaded(progName string) bool {
 }
 
 // GetLoadedProgram retrieves a handle to a loaded (pinned) program.
-func (o *Ouroboros) GetLoadedProgram(progName string) (*ebpf.Program, error) {
+func (o *Ouroboros) GetLoadedProgram(progName string) (*LoadedProgram, error) {
+	prog := o.GetProgram(progName)
+	if prog == nil {
+		return nil, fmt.Errorf("program %s not found in config", progName)
+	}
+
 	pinPath := filepath.Join(o.GetBpfBaseDir(), progName)
-	return ebpf.LoadPinnedProgram(pinPath, nil)
+	res, err := ebpf.LoadPinnedProgram(pinPath, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	collection, err := ebpf.LoadCollection(pinPath)
+	return &LoadedProgram{
+		Name:       progName,
+		ID:         prog.ID,
+		Program:    res,
+		Collection: collection,
+	}, nil
 }
 
 // LoadProgramMap loads or creates the program array map used for tail calls.
