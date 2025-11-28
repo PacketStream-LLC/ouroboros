@@ -2,6 +2,12 @@
 
 > [!WARNING]
 > This is not an official PacketStream LLC service or product.
+>
+> This is still in experimental state and subject to change until v1.0.0 has reached:
+> * **CLI**: less-likely to change.
+> * **SDK**: Rapid development in progress and implementing QoL changes right now (v0.1.x)
+>
+> Use at your own risk.
 
 `ouroboros` helps you manage and chain multiple eBPF programs together via managing central `PROGRAM_MAPS` and shared `PINNED` eBPF maps/ringbufs, 
 making it easier to `bpf_tail_call` and build complex chain of eBPF program flow structure for complext programs
